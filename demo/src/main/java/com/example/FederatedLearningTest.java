@@ -16,6 +16,13 @@ public class FederatedLearningTest {
         System.out.println("------------------------");
         System.out.println("测试开始时间: " + System.currentTimeMillis());
         System.out.println("测试结束时间: " + System.currentTimeMillis());
+        System.out.println("测试持续时间: " + (System.currentTimeMillis() - System.currentTimeMillis()) + "ms");
+        // 模拟 DO 的数量
+        // 这里假设有 8 个 DO
+        // 你可以根据需要调整这个数量
+        // 例如：int numDO = 8;
+        // 这里假设有 8 个 DO
+        // 你可以根据需要调整这个数量
         int numDO = 8;
         // 模拟每个 DO 的模型参数字符串（保持不变）
         String[] modelParamStrings = {

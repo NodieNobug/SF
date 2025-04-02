@@ -12,7 +12,7 @@ import java.util.Map;
 // 测试类：包含两种场景的测试
 public class FederatedLearningTest {
     public static void main(String[] args) {
-        System.out.println("Federated Learning Test");
+        System.out.println("Federated Learning Test 测试git是否可用");
         System.out.println("------------------------");
 
         int numDO = 8;

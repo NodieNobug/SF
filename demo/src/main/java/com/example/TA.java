@@ -7,6 +7,7 @@ import java.util.Map;
 
 // TA 类：负责全局参数生成、为每个 DO 生成私钥，并将私钥秘密分片分发给其它 DO
 class TA {
+    // TA 类：负责全局参数生成、为每个 DO 生成私钥，并将私钥秘密分片分发给其它 DO
     public BigInteger N, g, h, lambda, u, y;
     public int bitLength = 1024;
     private SecureRandom random = new SecureRandom();

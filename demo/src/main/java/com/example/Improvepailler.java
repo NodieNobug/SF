@@ -5,6 +5,7 @@ import java.security.SecureRandom;
 
 class ImprovedPaillier {
     // 改进的 Paillier 加密算法
+    // 该类实现了 Paillier 加密算法的基本功能，包括密钥生成、加密和解密
     private BigInteger N, g, lambda, u;
     private SecureRandom random = new SecureRandom();
     private int bitLength = 1024;

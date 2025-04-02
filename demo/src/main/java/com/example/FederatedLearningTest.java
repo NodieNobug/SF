@@ -14,6 +14,8 @@ public class FederatedLearningTest {
     public static void main(String[] args) {
         System.out.println("Federated Learning Test");
         System.out.println("------------------------");
+        System.out.println("测试开始时间: " + System.currentTimeMillis());
+        System.out.println("测试结束时间: " + System.currentTimeMillis());
         int numDO = 8;
         // 模拟每个 DO 的模型参数字符串（保持不变）
         String[] modelParamStrings = {

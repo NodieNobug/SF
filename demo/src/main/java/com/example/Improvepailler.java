@@ -4,6 +4,7 @@ import java.math.BigInteger;
 import java.security.SecureRandom;
 
 class ImprovedPaillier {
+    // 改进的 Paillier 加密算法
     private BigInteger N, g, lambda, u;
     private SecureRandom random = new SecureRandom();
     private int bitLength = 1024;

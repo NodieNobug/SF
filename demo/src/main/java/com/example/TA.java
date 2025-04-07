@@ -4,6 +4,8 @@ import java.math.BigInteger;
 import java.security.SecureRandom;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Random;
+import java.util.Arrays;
 
 // TA 类：负责全局参数生成、为每个 DO 生成私钥，并将私钥秘密分片分发给其它 DO
 class TA {
@@ -23,13 +25,97 @@ class TA {
     private BigInteger R_t; // 新增：存储R_t
     private BigInteger[] n_i; // 存储所有DO的ni值
 
+    private static final int ORTHOGONAL_VECTOR_COUNT = 5;
+    private static final int MODEL_SIZE = 5; // Define MODEL_SIZE with an appropriate value
+    private double[][] orthogonalVectors;
+
     /**
      * 构造 TA 对象，numDO 表示参与联邦学习的 DO 数量。
      */
     public TA(int numDO, BigInteger[] modelParamHashes) { // 恢复 modelParamHashes 参数
         // 新增：根据DO数量动态设置门限值
         this.threshold = (numDO * 2) / 3; // 设置为总数的2/3，可以根据需求调整
+        generateOrthogonalVectors();
         keyGeneration(numDO, modelParamHashes); // 恢复 modelParamHashes 参数
+    }
+
+    public void generateOrthogonalVectors() {
+        // 随机生成一个矩阵
+        orthogonalVectors = new double[ORTHOGONAL_VECTOR_COUNT][MODEL_SIZE];
+        Random rand = new Random();
+
+        // 生成第一个随机向量并归一化
+        for (int j = 0; j < MODEL_SIZE; j++) {
+            orthogonalVectors[0][j] = rand.nextGaussian();
+        }
+        orthogonalVectors[0] = normalizeVector(orthogonalVectors[0]);
+
+        // 使用Gram-Schmidt生成其他正交向量
+        for (int i = 1; i < ORTHOGONAL_VECTOR_COUNT; i++) {
+            // 生成随机向量
+            for (int j = 0; j < MODEL_SIZE; j++) {
+                orthogonalVectors[i][j] = rand.nextGaussian();
+            }
+
+            // Gram-Schmidt正交化
+            for (int k = 0; k < i; k++) {
+                double projection = 0;
+                double norm = 0;
+                for (int j = 0; j < MODEL_SIZE; j++) {
+                    projection += orthogonalVectors[i][j] * orthogonalVectors[k][j];
+                    norm += orthogonalVectors[k][j] * orthogonalVectors[k][j];
+                }
+                double coef = projection / norm;
+
+                // 正交化
+                for (int j = 0; j < MODEL_SIZE; j++) {
+                    orthogonalVectors[i][j] -= coef * orthogonalVectors[k][j];
+                }
+            }
+
+            // 数值修正：将极小的向量投影值设为0，防止浮动误差
+            orthogonalVectors[i] = normalizeVector(orthogonalVectors[i]);
+        }
+
+        // 输出生成的正交向量
+        // System.out.println("生成的正交向量组：");
+        // for (int i = 0; i < ORTHOGONAL_VECTOR_COUNT; i++) {
+        // System.out.println("向量" + i + ": " + Arrays.toString(orthogonalVectors[i]));
+        // }
+
+        // 检查点积是否为0
+        checkOrthogonality();
+    }
+
+    // 归一化向量
+    private double[] normalizeVector(double[] vector) {
+        double[] normalized = new double[vector.length];
+        double norm = 0;
+        for (double val : vector) {
+            norm += val * val;
+        }
+        norm = Math.sqrt(norm);
+        if (norm > 0) {
+            for (int i = 0; i < vector.length; i++) {
+                normalized[i] = vector[i] / norm;
+            }
+        }
+        return normalized;
+    }
+
+    // 检查向量之间的点积是否为零
+    private void checkOrthogonality() {
+        for (int i = 0; i < ORTHOGONAL_VECTOR_COUNT; i++) {
+            for (int j = i + 1; j < ORTHOGONAL_VECTOR_COUNT; j++) {
+                double dotProduct = 0;
+                for (int k = 0; k < MODEL_SIZE; k++) {
+                    dotProduct += orthogonalVectors[i][k] * orthogonalVectors[j][k];
+                }
+                if (Math.abs(dotProduct) > 1e-10) {
+                    System.out.println("向量 " + i + " 和 向量 " + j + " 的点积: " + dotProduct);
+                }
+            }
+        }
     }
 
     private void keyGeneration(int numDO, BigInteger[] modelParamHashes) { // 恢复 modelParamHashes 参数
@@ -132,5 +218,9 @@ class TA {
     // 新增：获取特定DO的ni值
     public BigInteger getNi(int doId) {
         return n_i[doId];
+    }
+
+    public double[][] getOrthogonalVectors() {
+        return orthogonalVectors;
     }
 }

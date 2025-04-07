@@ -26,6 +26,8 @@ class DO {
     public Map<Integer, BigInteger> receivedKeyShares = new HashMap<>();
     // 存储 TA 分发的哈希算法类型
     public String hashAlgorithm;
+    private double[] projectionResults;
+    private double[][] orthogonalVectors;
 
     public DO(int id, TA ta) {
         this.id = id;
@@ -35,6 +37,8 @@ class DO {
         this.hashAlgorithm = ta.getHashAlgorithm();
         this.localModelParams = new double[MODEL_SIZE];
         this.encryptedModelParams = new BigInteger[MODEL_SIZE];
+        this.orthogonalVectors = ta.getOrthogonalVectors();
+        this.projectionResults = new double[orthogonalVectors.length];
 
         // 存储分给本DO的所有其他DO的私钥分片
         for (Map.Entry<Integer, Map<Integer, BigInteger>> entry : ta.doKeyShares.entrySet()) {
@@ -151,5 +155,29 @@ class DO {
         BigInteger share = receivedKeyShares.get(sourceDOId);
         // System.out.println("DO " + id + " 上传 DO " + sourceDOId + " 的分片: " + share);
         return share;
+    }
+
+    /**
+     * 计算投影结果
+     */
+    public void calculateProjections() {
+        projectionResults = new double[MODEL_SIZE * orthogonalVectors.length];
+        int index = 0;
+        // 对每个正交向量
+        for (int i = 0; i < orthogonalVectors.length; i++) {
+            // 逐元素相乘，不求和
+            for (int j = 0; j < MODEL_SIZE; j++) {
+                projectionResults[index++] = orthogonalVectors[i][j] * localModelParams[j];
+            }
+        }
+        System.out.println("DO " + id + " 的投影结果(逐元素相乘): " + Arrays.toString(projectionResults));
+    }
+
+    public double[] getProjectionResults() {
+        return projectionResults;
+    }
+
+    public double[] getLocalModelParams() {
+        return Arrays.copyOf(localModelParams, localModelParams.length);
     }
 }

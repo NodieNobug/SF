@@ -79,7 +79,7 @@ class CSP {
     }
 
     /**
-     * 解密聚合后的模型参数
+     * 解密聚合后的模型参数，并处理大数溢出问题
      */
     public double[] decrypt(BigInteger[] aggregated, BigInteger lambda, BigInteger N,
             BigInteger u, BigInteger y, List<BigInteger> allPrivateKeys) {
@@ -88,7 +88,14 @@ class CSP {
             BigInteger L = aggregated[i].modPow(lambda, N.multiply(N))
                     .subtract(BigInteger.ONE).divide(N);
             BigInteger decrypted = L.multiply(u).mod(N).mod(y);
-            // 将BigInteger转换回double（除以10^6恢复精度）
+
+            // 在BigInteger阶段处理负数情况
+            if (decrypted.compareTo(y.divide(BigInteger.TWO)) > 0) {
+                System.out.println("" + i + " 号参数溢出，进行修正.....");
+                decrypted = decrypted.subtract(y);
+            }
+
+            // 将处理后的BigInteger转换为double（除以10^6恢复精度）
             decryptedParams[i] = decrypted.doubleValue() / 1000000.0;
         }
         return decryptedParams;

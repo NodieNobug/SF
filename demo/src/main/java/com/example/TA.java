@@ -151,32 +151,23 @@ class TA {
             R_t = new BigInteger(bitLength, random);
         } while (!R_t.gcd(N).equals(BigInteger.ONE));
 
-        // 修改：恢复原方案，直接在TA端计算完整私钥
+        // 确保每个DO的私钥和分片正确生成
         for (int i = 0; i < numDO; i++) {
             BigInteger sk = R_t.modPow(n_i[i].multiply(modelParamHashes[i]), N.multiply(N));
             doPrivateKeys.put(i, sk);
         }
 
         // 对每个 DO 的私钥进行秘密分片
-        BigInteger modulus = N.multiply(N); // 修改：使用N^2作为模数，因为私钥在N^2下运算
+        BigInteger modulus = N.multiply(N); // 使用N^2作为模数
         for (int i = 0; i < numDO; i++) {
-            // System.out.println("DO " + i + " 的原始私钥: " + doPrivateKeys.get(i));
             Map<Integer, BigInteger> shares = Threshold.splitSecret(doPrivateKeys.get(i), numDO, threshold, modulus);
             Map<Integer, BigInteger> distributedShares = new HashMap<>();
             for (int j = 0; j < numDO; j++) {
                 if (j != i) {
-                    distributedShares.put(j, shares.get(j + 1));
+                    distributedShares.put(j, shares.get(j + 1)); // 分发给其他DO
                 }
             }
             doKeyShares.put(i, distributedShares);
-
-            // TestDemo:验证生成的分片是否可以还原
-            // Map<Integer, BigInteger> testShares = new HashMap<>();
-            // for (int j = 1; j <= 5; j++) {
-            // testShares.put(j, shares.get(j));
-            // }
-            // BigInteger reconstructed = Threshold.reconstructSecret(testShares, modulus);
-            // System.out.println("验证重构: " + reconstructed.equals(doPrivateKeys.get(i)));
         }
     }
 
@@ -218,6 +209,10 @@ class TA {
     // 新增：获取特定DO的ni值
     public BigInteger getNi(int doId) {
         return n_i[doId];
+    }
+
+    public BigInteger getY() {
+        return y;
     }
 
     public double[][] getOrthogonalVectors() {

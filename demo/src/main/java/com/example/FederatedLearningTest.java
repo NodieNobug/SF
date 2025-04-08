@@ -41,17 +41,17 @@ public class FederatedLearningTest {
             return;
         }
 
-        // ---------------- 场景1：正常流程测试 ----------------
+        // // ---------------- 场景1：正常流程测试 ----------------
         // System.out.println("----- 正常流程测试 -----");
         // runTestScenario(numDO, modelParamHashes, new ArrayList<>());
 
-        // // ---------------- 场景2：模拟单个 DO 掉线 ----------------
+        // // // ---------------- 场景2：模拟单个 DO 掉线 ----------------
         // System.out.println("\n----- 掉线场景测试 -----");
         // System.out.println("总DO数量: " + numDO);
         // System.out.println("门限值: 5");
         // runTestScenario(numDO, modelParamHashes, Arrays.asList(1));
 
-        // // ---------------- 场景3：模拟多个 DO 掉线 ----------------
+        // // // ---------------- 场景3：模拟多个 DO 掉线 ----------------
         // System.out.println("\n----- 多 DO 掉线场景测试 -----");
         // System.out.println("总DO数量: " + numDO);
         // System.out.println("门限值: 5");
@@ -65,10 +65,10 @@ public class FederatedLearningTest {
         runConsistentPoisonTest(numDO, modelParamHashes);
 
         // ---------------- 场景5：伪装投毒测试 ----------------
-        // System.out.println("\n----- 伪装投毒测试场景 -----");
-        // System.out.println("总DO数量: " + numDO);
-        // System.out.println("投毒DO数量: 1");
-        // runDisguisedPoisonTest(numDO, modelParamHashes);
+        System.out.println("\n----- 伪装投毒测试场景 -----");
+        System.out.println("总DO数量: " + numDO);
+        System.out.println("投毒DO数量: 1");
+        runDisguisedPoisonTest(numDO, modelParamHashes);
     }
 
     private static void runTestScenario(int numDO, BigInteger[] modelParamHashes, List<Integer> missingDOIds) {
@@ -91,7 +91,7 @@ public class FederatedLearningTest {
             }
             DO doObj = doList.get(i);
             doObj.trainModel();
-            doObj.encryptData(modelParamHashes[i], ta.getN(), ta.getG(), ta.getH());
+            doObj.encryptData(ta.getN(), ta.getG(), ta.getH());
             csp.receiveData(i, doObj.getEncryptedModelParams());
         }
 
@@ -138,7 +138,7 @@ public class FederatedLearningTest {
                 allPrivateKeys.add(ta.doPrivateKeys.get(i)); // 使用原始私钥
             }
         }
-        double[] decryptedParams = csp.decrypt(aggregated, ta.getLambda(), ta.getN(), ta.getU(), ta.y, allPrivateKeys);
+        double[] decryptedParams = csp.decrypt(aggregated, ta.getLambda(), ta.getN(), ta.getU(), ta.y);
 
         // 在解密后进行投毒检测
         List<Integer> suspectedDOs = csp.detectPoisoning(decryptedParams);
@@ -194,7 +194,7 @@ public class FederatedLearningTest {
             }
 
             // 使用安全加密机制加密参数
-            doObj.encryptData(modelParamHashes[i], ta.getN(), ta.getG(), ta.getH());
+            doObj.encryptData(ta.getN(), ta.getG(), ta.getH());
             csp.receiveData(i, doObj.getEncryptedModelParams());
         }
 
@@ -254,7 +254,7 @@ public class FederatedLearningTest {
             }
 
             // 使用安全加密机制加密参数
-            doObj.encryptData(modelParamHashes[i], ta.getN(), ta.getG(), ta.getH());
+            doObj.encryptData(ta.getN(), ta.getG(), ta.getH());
             csp.receiveData(i, doObj.getEncryptedModelParams());
         }
 
@@ -295,7 +295,7 @@ public class FederatedLearningTest {
             allPrivateKeys.add(ta.doPrivateKeys.get(i));
         }
 
-        double[] decryptedParams = csp.decrypt(aggregated, ta.getLambda(), ta.getN(), ta.getU(), ta.y, allPrivateKeys);
+        double[] decryptedParams = csp.decrypt(aggregated, ta.getLambda(), ta.getN(), ta.getU(), ta.y);
         System.out.println("\n第一轮解密后的聚合模型参数M: " + Arrays.toString(decryptedParams));
         System.out.println(ta.y);
 

@@ -59,8 +59,8 @@ class CSP {
         for (int i = 0; i < MODEL_SIZE; i++) {
             aggregatedModelParams[i] = BigInteger.ONE;
             for (BigInteger[] params : receivedModelParams.values()) {
-                aggregatedModelParams[i] = aggregatedModelParams[i].multiply(params[i])
-                        .mod(N.multiply(N));
+
+                aggregatedModelParams[i] = aggregatedModelParams[i].multiply(params[i]).mod(N.multiply(N));
             }
         }
         return aggregatedModelParams;
@@ -72,8 +72,7 @@ class CSP {
      * allPrivateKeys 为所有 DO 的私钥列表（包括恢复后的掉线 DO 私钥）。
      * 注意：示例中为简化实现，未对各私钥进行联合分布式解密。
      */
-    public BigInteger decrypt(BigInteger aggregated, BigInteger lambda, BigInteger N, BigInteger u, BigInteger y,
-            List<BigInteger> allPrivateKeys) {
+    public BigInteger decrypt(BigInteger aggregated, BigInteger lambda, BigInteger N, BigInteger u, BigInteger y) {
         BigInteger L = aggregated.modPow(lambda, N.multiply(N)).subtract(BigInteger.ONE).divide(N);
         return L.multiply(u).mod(N).mod(y);
     }
@@ -82,13 +81,14 @@ class CSP {
      * 解密聚合后的模型参数，并处理大数溢出问题
      */
     public double[] decrypt(BigInteger[] aggregated, BigInteger lambda, BigInteger N,
-            BigInteger u, BigInteger y, List<BigInteger> allPrivateKeys) {
+            BigInteger u, BigInteger y) {
         double[] decryptedParams = new double[MODEL_SIZE];
         for (int i = 0; i < MODEL_SIZE; i++) {
             BigInteger L = aggregated[i].modPow(lambda, N.multiply(N))
                     .subtract(BigInteger.ONE).divide(N);
             BigInteger decrypted = L.multiply(u).mod(N).mod(y);
-
+            System.out.println("解密后的结果" + decrypted);
+            System.out.println("y值是" + y);
             // 在BigInteger阶段处理负数情况
             if (decrypted.compareTo(y.divide(BigInteger.TWO)) > 0) {
                 System.out.println("" + i + " 号参数溢出，进行修正.....");
@@ -361,4 +361,22 @@ class CSP {
         return norm == 0 ? 0 : dotProduct / norm;
     }
 
+    /**
+     * 更新TA参数
+     */
+    public void updateTA(TA newTA) {
+        this.ta = newTA;
+        this.orthogonalVectors = newTA.getOrthogonalVectors();
+        System.out.println("CSP 更新了TA的全局参数和正交向量");
+    }
+
+    /**
+     * 清理CSP的状态
+     */
+    public void clearState() {
+        receivedModelParams.clear();
+        receivedProjections.clear();
+        System.out.println("CSP 状态已清理，准备进入下一轮联邦学习");
+
+    }
 }

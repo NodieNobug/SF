@@ -9,25 +9,14 @@ import java.util.*;
 
 class DO {
     private int id;
-    private TA ta; // 用于获取全局参数及自己的主私钥
-    private CSP csp; // 模拟与 CSP 通信（在部分场景下可通过调用方法实现）
+    private TA ta; // 用于获取全局参数及私钥
+    private BigInteger myPrivateKey; // 存储自己的私钥
+    private Map<Integer, BigInteger> receivedKeyShares = new HashMap<>(); // 存储其他DO的私钥分片
+    private double[][] orthogonalVectors; // 正交向量组
     private static int MODEL_SIZE = 5; // 模型参数大小：4个权重 + 1个偏置
     private double[] localModelParams; // 存储本地模型参数
     private BigInteger[] encryptedModelParams; // 存储加密后的模型参数数组
-    private double[][] localData; // 本地训练数据
-    private double[] localLabels; // 本地训练标签
-    public BigInteger localDataValue; // 模拟本地数据（例如训练后的梯度或参数）
-    public BigInteger encryptedData; // 加密后的数据
-    // 本 DO 的主私钥，由 TA 生成
-    public BigInteger myPrivateKey;
-    private BigInteger basePrivateKey; // 新增：存储TA分发的基础私钥
-    private BigInteger modelParamHash; // 新增：存储模型参数哈希值
-    // 存储 TA 分发来的其它 DO 对本 DO 私钥的备用分片，用于恢复掉线时的私钥（key: 来源 DO id, value: 分片值）
-    public Map<Integer, BigInteger> receivedKeyShares = new HashMap<>();
-    // 存储 TA 分发的哈希算法类型
-    public String hashAlgorithm;
     private double[] projectionResults;
-    private double[][] orthogonalVectors;
 
     // 新增用于数据处理的成员变量
     private List<double[]> processedData = new ArrayList<>();
@@ -38,13 +27,8 @@ class DO {
     public DO(int id, TA ta) {
         this.id = id;
         this.ta = ta;
-        this.basePrivateKey = ta.doPrivateKeys.get(id);
-        this.myPrivateKey = this.basePrivateKey; // 初始化为基础私钥
-        this.hashAlgorithm = ta.getHashAlgorithm();
-        this.localModelParams = new double[MODEL_SIZE];
-        this.encryptedModelParams = new BigInteger[MODEL_SIZE];
-        this.orthogonalVectors = ta.getOrthogonalVectors();
-        this.projectionResults = new double[orthogonalVectors.length]; // 长度为5，对应5个正交向量
+        this.myPrivateKey = ta.doPrivateKeys.get(id); // 获取自己的私钥
+        this.orthogonalVectors = ta.getOrthogonalVectors(); // 获取正交向量组
 
         // 存储分给本DO的所有其他DO的私钥分片
         for (Map.Entry<Integer, Map<Integer, BigInteger>> entry : ta.doKeyShares.entrySet()) {
@@ -54,7 +38,10 @@ class DO {
                 receivedKeyShares.put(sourceDOId, shares.get(this.id));
             }
         }
-        // System.out.println("DO " + id + " 收到的分片: " + receivedKeyShares);
+
+        this.localModelParams = new double[MODEL_SIZE];
+        this.encryptedModelParams = new BigInteger[MODEL_SIZE];
+        this.projectionResults = new double[orthogonalVectors.length];
 
         loadAndProcessData(); // 在构造函数中加载数据
     }
@@ -181,50 +168,41 @@ class DO {
         }
     }
 
-    /**
-     * 生成模拟训练数据
-     */
-    private void generateTrainingData() {
-        int dataSize = 100; // 每个DO生成100条训练数据
-        SecureRandom random = new SecureRandom();
-        localData = new double[dataSize][MODEL_SIZE - 1]; // 特征维度为MODEL_SIZE-1
-        localLabels = new double[dataSize];
+    // /**
+    // * 生成模拟训练数据
+    // */
+    // private void generateTrainingData() {
+    // int dataSize = 100; // 每个DO生成100条训练数据
+    // SecureRandom random = new SecureRandom();
+    // localData = new double[dataSize][MODEL_SIZE - 1]; // 特征维度为MODEL_SIZE-1
+    // localLabels = new double[dataSize];
 
-        for (int i = 0; i < dataSize; i++) {
-            for (int j = 0; j < MODEL_SIZE - 1; j++) {
-                localData[i][j] = random.nextDouble() * 2 - 1; // 生成[-1,1]之间的随机数
-            }
-            // 根据特征生成标签，添加一些随机性
-            double sum = 0;
-            for (double feature : localData[i]) {
-                sum += feature;
-            }
-            localLabels[i] = sum > 0 ? 1 : 0;
-            if (random.nextDouble() < 0.1) { // 10%的噪声
-                localLabels[i] = 1 - localLabels[i];
-            }
-        }
-    }
+    // for (int i = 0; i < dataSize; i++) {
+    // for (int j = 0; j < MODEL_SIZE - 1; j++) {
+    // localData[i][j] = random.nextDouble() * 2 - 1; // 生成[-1,1]之间的随机数
+    // }
+    // // 根据特征生成标签，添加一些随机性
+    // double sum = 0;
+    // for (double feature : localData[i]) {
+    // sum += feature;
+    // }
+    // localLabels[i] = sum > 0 ? 1 : 0;
+    // if (random.nextDouble() < 0.1) { // 10%的噪声
+    // localLabels[i] = 1 - localLabels[i];
+    // }
+    // }
+    // }
 
     /**
      * 训练逻辑回归模型 - 使用固定的5个参数
+     * 训练后更新localModelParams。
      */
     public void trainModel() {
-        // 保持MODEL_SIZE为5
-        MODEL_SIZE = 5; // 4个特征权重 + 1个偏置项
-        localModelParams = new double[MODEL_SIZE];
-        encryptedModelParams = new BigInteger[MODEL_SIZE];
-
-        // 初始化模型参数
-        for (int i = 0; i < MODEL_SIZE; i++) {
-            localModelParams[i] = 0.0;
-        }
-        // 学习率和迭代次数
+        System.out.println("DO " + id + " 开始本地训练...");
         double learningRate = 0.005;
-        int epochs = 100;
+        int epochs = 10;
         int dataSize = processedData.size();
 
-        // 训练过程
         for (int epoch = 0; epoch < epochs; epoch++) {
             double totalLoss = 0;
             for (int i = 0; i < dataSize; i++) {
@@ -246,11 +224,11 @@ class DO {
 
             if (epoch % 10 == 0) {
                 System.out.println("DO " + id + " Epoch " + epoch +
-                        " Average Loss: " + totalLoss / dataSize);
+                        " 平均损失: " + totalLoss / dataSize);
             }
         }
 
-        System.out.println("DO " + id + " 完成本地训练，模型参数: " +
+        System.out.println("DO " + id + " 本地训练完成，更新后的模型参数: " +
                 Arrays.toString(localModelParams));
     }
 
@@ -269,20 +247,17 @@ class DO {
     /**
      * 加密模型参数
      */
-    public void encryptData(BigInteger modelParamHash, BigInteger N, BigInteger g, BigInteger h) {
-        BigInteger R_t = ta.getR_t();
+    public void encryptData(BigInteger N, BigInteger g, BigInteger h) {
         BigInteger N2 = N.multiply(N);
         SecureRandom random = new SecureRandom();
 
         for (int i = 0; i < MODEL_SIZE; i++) {
-            // 将double转换为BigInteger（乘以10^6以保持精度）
             BigInteger paramValue = BigInteger.valueOf((long) (localModelParams[i] * 1000000));
             BigInteger r = new BigInteger(N.bitLength() / 2, random);
 
             BigInteger part1 = g.modPow(paramValue, N2);
             BigInteger part2 = h.modPow(r, N2);
-            encryptedModelParams[i] = part1.multiply(part2).mod(N2)
-                    .multiply(myPrivateKey).mod(N2);
+            encryptedModelParams[i] = part1.multiply(part2).mod(N2).multiply(ta.doPrivateKeys.get(id)).mod(N2);
         }
     }
 
@@ -294,9 +269,7 @@ class DO {
      * 响应 CSP 的请求，上传 TA 分发给本 DO、来源于 sourceDOId 的私钥分片。
      */
     public BigInteger uploadKeyShare(int sourceDOId) {
-        BigInteger share = receivedKeyShares.get(sourceDOId);
-        // System.out.println("DO " + id + " 上传 DO " + sourceDOId + " 的分片: " + share);
-        return share;
+        return receivedKeyShares.get(sourceDOId); // 上传其他DO的私钥分片
     }
 
     /**
@@ -321,5 +294,35 @@ class DO {
 
     public double[] getLocalModelParams() {
         return Arrays.copyOf(localModelParams, localModelParams.length);
+    }
+
+    /**
+     * 更新全局模型参数
+     * 接收CSP分发的全局模型参数，并将其作为初始模型参数。
+     */
+    public void updateGlobalModelParams(double[] globalModelParams) {
+        System.out.println("DO " + id + " 接收到全局模型参数: " + Arrays.toString(globalModelParams));
+        this.localModelParams = Arrays.copyOf(globalModelParams, globalModelParams.length); // 初始化模型参数
+    }
+
+    /**
+     * 更新TA参数
+     */
+    public void updateTA(TA ta) {
+        this.ta = ta;
+        this.myPrivateKey = ta.doPrivateKeys.get(id); // 更新自己的私钥
+        this.orthogonalVectors = ta.getOrthogonalVectors(); // 更新正交向量组
+
+        // 清空并重新存储分片
+        receivedKeyShares.clear();
+        for (Map.Entry<Integer, Map<Integer, BigInteger>> entry : ta.doKeyShares.entrySet()) {
+            int sourceDOId = entry.getKey();
+            Map<Integer, BigInteger> shares = entry.getValue();
+            if (shares.containsKey(this.id)) {
+                receivedKeyShares.put(sourceDOId, shares.get(this.id));
+            }
+        }
+
+        System.out.println("DO " + id + " 更新了TA参数和私钥分片");
     }
 }

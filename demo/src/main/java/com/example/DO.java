@@ -38,7 +38,7 @@ class DO {
         this.localModelParams = new double[MODEL_SIZE];
         this.encryptedModelParams = new BigInteger[MODEL_SIZE];
         this.orthogonalVectors = ta.getOrthogonalVectors();
-        this.projectionResults = new double[orthogonalVectors.length];
+        this.projectionResults = new double[orthogonalVectors.length]; // 长度为5，对应5个正交向量
 
         // 存储分给本DO的所有其他DO的私钥分片
         for (Map.Entry<Integer, Map<Integer, BigInteger>> entry : ta.doKeyShares.entrySet()) {
@@ -158,19 +158,19 @@ class DO {
     }
 
     /**
-     * 计算投影结果
+     * 计算点积结果
      */
     public void calculateProjections() {
-        projectionResults = new double[MODEL_SIZE * orthogonalVectors.length];
-        int index = 0;
-        // 对每个正交向量
+        projectionResults = new double[orthogonalVectors.length]; // 修改为正确长度5
+        // 计算模型参数与每个正交向量的点积
         for (int i = 0; i < orthogonalVectors.length; i++) {
-            // 逐元素相乘，不求和
+            double dotProduct = 0;
             for (int j = 0; j < MODEL_SIZE; j++) {
-                projectionResults[index++] = orthogonalVectors[i][j] * localModelParams[j];
+                dotProduct += orthogonalVectors[i][j] * localModelParams[j];
             }
+            projectionResults[i] = dotProduct;
         }
-        System.out.println("DO " + id + " 的投影结果(逐元素相乘): " + Arrays.toString(projectionResults));
+        System.out.println("DO " + id + " 的点积结果（模型参数在各正交向量上的投影）: " + Arrays.toString(projectionResults));
     }
 
     public double[] getProjectionResults() {

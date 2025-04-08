@@ -59,16 +59,16 @@ public class FederatedLearningTest {
         // runTestScenario(numDO, modelParamHashes, Arrays.asList(2, 3));
 
         // ---------------- 场景4：一致性投毒测试 ----------------
-        // System.out.println("\n----- 一致性投毒测试场景 -----");
-        // System.out.println("总DO数量: " + numDO);
-        // System.out.println("投毒DO数量: 1");
-        // runConsistentPoisonTest(numDO, modelParamHashes);
-
-        // ---------------- 场景5：伪装投毒测试 ----------------
-        System.out.println("\n----- 伪装投毒测试场景 -----");
+        System.out.println("\n----- 一致性投毒测试场景 -----");
         System.out.println("总DO数量: " + numDO);
         System.out.println("投毒DO数量: 1");
-        runDisguisedPoisonTest(numDO, modelParamHashes);
+        runConsistentPoisonTest(numDO, modelParamHashes);
+
+        // ---------------- 场景5：伪装投毒测试 ----------------
+        // System.out.println("\n----- 伪装投毒测试场景 -----");
+        // System.out.println("总DO数量: " + numDO);
+        // System.out.println("投毒DO数量: 1");
+        // runDisguisedPoisonTest(numDO, modelParamHashes);
     }
 
     private static void runTestScenario(int numDO, BigInteger[] modelParamHashes, List<Integer> missingDOIds) {
@@ -297,38 +297,18 @@ public class FederatedLearningTest {
 
         double[] decryptedParams = csp.decrypt(aggregated, ta.getLambda(), ta.getN(), ta.getU(), ta.y, allPrivateKeys);
         System.out.println("\n第一轮解密后的聚合模型参数M: " + Arrays.toString(decryptedParams));
+        System.out.println(ta.y);
 
-        // 第二步：反推正交向量并验证
-        System.out.println("\n===== 正交向量验证 =====");
-        double[][] recoveredVectors = csp.recoverOrthogonalVectors(decryptedParams);
-        System.out.println("TA生成的正交向量组:");
-        printOrthogonalVectors(ta.getOrthogonalVectors());
-        System.out.println("反推得到的正交向量组:");
-        for (int i = 0; i < recoveredVectors.length; i++) {
-            System.out.println("向量" + i + ": " + Arrays.toString(recoveredVectors[i]));
-        }
-
-        boolean isOrthogonal = csp.verifyOrthogonality(recoveredVectors, 0.001); // Example threshold value
-        if (!isOrthogonal) {
-            System.out.println("警告：反推的向量组不正交，说明存在DO使用了不一致的参数");
-        } else {
-            System.out.println("正交性验证通过");
-        }
-
-        // 第三步：基于投影结果的投毒检测
+        // 直接进行投毒检测
         System.out.println("\n===== 投毒检测结果 =====");
         List<Integer> suspectedDOs = csp.detectPoisoning(decryptedParams);
 
         // 输出检测结果
         if (!suspectedDOs.isEmpty()) {
-            System.out.println("\n检测结果分析：");
-            if (testType.equals("一致性投毒")) {
-                System.out.println("正交性验证应该通过（因为使用了相同参数），但投影聚类检测到异常DO");
-            } else {
-                System.out.println("正交性验证失败（因为使用了不同参数），投影聚类可能检测不到异常");
-            }
+            System.out.println("检测到可疑DO: " + suspectedDOs);
+            System.out.println("CSP通过比较点积结果发现参数不一致，并通过聚类分析找出了可疑DO");
         } else {
-            System.out.println("\n未检测到异常行为");
+            System.out.println("未检测到异常行为，所有DO的点积结果一致");
         }
     }
 

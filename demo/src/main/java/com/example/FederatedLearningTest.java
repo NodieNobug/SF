@@ -52,11 +52,11 @@ public class FederatedLearningTest {
         // runTestScenario(numDO, modelParamHashes, Arrays.asList(1));
 
         // // // ---------------- 场景3：模拟多个 DO 掉线 ----------------
-        // System.out.println("\n----- 多 DO 掉线场景测试 -----");
-        // System.out.println("总DO数量: " + numDO);
-        // System.out.println("门限值: 5");
-        // System.out.println("掉线DO数量: 2");
-        // runTestScenario(numDO, modelParamHashes, Arrays.asList(2, 3));
+        System.out.println("\n----- 多 DO 掉线场景测试 -----");
+        System.out.println("总DO数量: " + numDO);
+        System.out.println("门限值: 5");
+        System.out.println("掉线DO数量: 2");
+        runTestScenario(numDO, modelParamHashes, Arrays.asList(2, 3));
 
         // ---------------- 场景4：一致性投毒测试 ----------------
         System.out.println("\n----- 一致性投毒测试场景 -----");

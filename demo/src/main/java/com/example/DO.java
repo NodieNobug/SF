@@ -24,6 +24,8 @@ class DO {
     private Map<String, Integer> categoricalMaps = new HashMap<>();
     private static final String DATA_PATH = "d:\\Java_project\\SafeFl\\demo\\src\\main\\data\\adult.csv";
 
+    private double lastAverageLoss; // 新增：存储最近一轮的平均损失值
+
     public DO(int id, TA ta) {
         this.id = id;
         this.ta = ta;
@@ -168,31 +170,6 @@ class DO {
         }
     }
 
-    // /**
-    // * 生成模拟训练数据
-    // */
-    // private void generateTrainingData() {
-    // int dataSize = 100; // 每个DO生成100条训练数据
-    // SecureRandom random = new SecureRandom();
-    // localData = new double[dataSize][MODEL_SIZE - 1]; // 特征维度为MODEL_SIZE-1
-    // localLabels = new double[dataSize];
-
-    // for (int i = 0; i < dataSize; i++) {
-    // for (int j = 0; j < MODEL_SIZE - 1; j++) {
-    // localData[i][j] = random.nextDouble() * 2 - 1; // 生成[-1,1]之间的随机数
-    // }
-    // // 根据特征生成标签，添加一些随机性
-    // double sum = 0;
-    // for (double feature : localData[i]) {
-    // sum += feature;
-    // }
-    // localLabels[i] = sum > 0 ? 1 : 0;
-    // if (random.nextDouble() < 0.1) { // 10%的噪声
-    // localLabels[i] = 1 - localLabels[i];
-    // }
-    // }
-    // }
-
     /**
      * 训练逻辑回归模型 - 使用固定的5个参数
      * 训练后更新localModelParams。
@@ -202,6 +179,7 @@ class DO {
         double learningRate = 0.005;
         int epochs = 10;
         int dataSize = processedData.size();
+        double totalEpochLoss = 0;
 
         for (int epoch = 0; epoch < epochs; epoch++) {
             double totalLoss = 0;
@@ -226,8 +204,11 @@ class DO {
                 System.out.println("DO " + id + " Epoch " + epoch +
                         " 平均损失: " + totalLoss / dataSize);
             }
+            totalEpochLoss = totalLoss / dataSize;
         }
 
+        lastAverageLoss = totalEpochLoss; // 保存最后一轮的平均损失
+        System.out.println("DO " + id + " 本地训练完成，最终平均损失: " + lastAverageLoss);
         System.out.println("DO " + id + " 本地训练完成，更新后的模型参数: " +
                 Arrays.toString(localModelParams));
     }
@@ -242,6 +223,13 @@ class DO {
 
     private double sigmoid(double x) {
         return 1.0 / (1.0 + Math.exp(-x));
+    }
+
+    /**
+     * 新增：获取最近一轮的平均损失值
+     */
+    public double getLastAverageLoss() {
+        return lastAverageLoss;
     }
 
     /**

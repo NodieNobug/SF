@@ -118,7 +118,15 @@ class TA {
         }
     }
 
-    private void keyGeneration(int numDO, BigInteger[] modelParamHashes) { // 恢复 modelParamHashes 参数
+    private void keyGeneration(int numDO, BigInteger[] modelParamHashes) {
+        // 确保 modelParamHashes 的长度与 numDO 一致
+        if (modelParamHashes.length < numDO) {
+            modelParamHashes = Arrays.copyOf(modelParamHashes, numDO);
+            for (int i = modelParamHashes.length; i < numDO; i++) {
+                modelParamHashes[i] = BigInteger.ONE; // 填充默认值
+            }
+        }
+
         // 生成大素数 p, q
         BigInteger p = BigInteger.probablePrime(bitLength / 2, random);
         BigInteger q = BigInteger.probablePrime(bitLength / 2, random);

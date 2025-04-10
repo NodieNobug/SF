@@ -24,7 +24,7 @@ class DO {
     private Map<String, Integer> categoricalMaps = new HashMap<>();
     private static final String DATA_PATH = "d:\\Java_project\\SafeFl\\demo\\src\\main\\data\\adult.csv";
 
-    private double lastAverageLoss; // 新增：存储最近一轮的平均损失值
+    private double lastAverageLoss; // 储最近一轮的平均损失值,用于可视化
 
     public DO(int id, TA ta) {
         this.id = id;
@@ -40,16 +40,11 @@ class DO {
                 receivedKeyShares.put(sourceDOId, shares.get(this.id));
             }
         }
-
         this.localModelParams = new double[MODEL_SIZE];
         this.encryptedModelParams = new BigInteger[MODEL_SIZE];
         this.projectionResults = new double[orthogonalVectors.length];
 
         loadAndProcessData(); // 在构造函数中加载数据
-    }
-
-    public int getId() {
-        return id;
     }
 
     /**
@@ -113,7 +108,7 @@ class DO {
     }
 
     /**
-     * 处理单行数据 - 将高维特征降至4维
+     * 处理单行数据 - 由于方案中将模型参数长度统一设置为5{4个特征值+1个偏置值}
      */
     private double[] processRow(String[] values) {
         double[] result = new double[4]; // 固定使用4个特征
@@ -177,7 +172,7 @@ class DO {
     public void trainModel() {
         System.out.println("DO " + id + " 开始本地训练...");
         double learningRate = 0.005;
-        int epochs = 10;
+        int epochs = 100;
         int dataSize = processedData.size();
         double totalEpochLoss = 0;
 
@@ -225,15 +220,12 @@ class DO {
         return 1.0 / (1.0 + Math.exp(-x));
     }
 
-    /**
-     * 新增：获取最近一轮的平均损失值
-     */
     public double getLastAverageLoss() {
         return lastAverageLoss;
     }
 
     /**
-     * 加密模型参数
+     * 加密本地训练后的模型参数
      */
     public void encryptData(BigInteger N, BigInteger g, BigInteger h) {
         BigInteger N2 = N.multiply(N);
@@ -278,6 +270,10 @@ class DO {
 
     public double[] getProjectionResults() {
         return projectionResults;
+    }
+
+    public int getId() {
+        return id;
     }
 
     public double[] getLocalModelParams() {

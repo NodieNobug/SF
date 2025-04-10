@@ -54,6 +54,7 @@ class CSP {
     /**
      * 聚合所有DO的加密模型参数
      */
+
     public BigInteger[] aggregate(BigInteger N) {
         aggregatedModelParams = new BigInteger[MODEL_SIZE];
         for (int i = 0; i < MODEL_SIZE; i++) {
@@ -87,8 +88,8 @@ class CSP {
             BigInteger L = aggregated[i].modPow(lambda, N.multiply(N))
                     .subtract(BigInteger.ONE).divide(N);
             BigInteger decrypted = L.multiply(u).mod(N).mod(y);
-            System.out.println("解密后的结果" + decrypted);
-            System.out.println("y值是" + y);
+            // System.out.println("解密后的结果" + decrypted);
+            // System.out.println("y值是" + y);
             // 在BigInteger阶段处理负数情况
             if (decrypted.compareTo(y.divide(BigInteger.TWO)) > 0) {
                 System.out.println("" + i + " 号参数溢出，进行修正.....");
@@ -193,7 +194,7 @@ class CSP {
     }
 
     /**
-     * 基于点积结果比较和聚类分析进行投毒检测
+     * 基于点积结果比较和聚类分析进行投毒检测，接收解密得到的聚合后的模型参数值。
      */
     public List<Integer> detectPoisoning(double[] aggregatedParams) {
         List<Integer> suspectedDOs = new ArrayList<>();
@@ -275,7 +276,7 @@ class CSP {
         return suspectedDOs;
     }
 
-    // 保留必要的辅助方法
+    // 聚合来自DO的点积结果
     private double[] calculateAggregatedProjections() {
         double[] aggregatedProjections = new double[orthogonalVectors.length];
         for (double[] projections : receivedProjections.values()) {

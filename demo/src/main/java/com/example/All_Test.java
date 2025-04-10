@@ -23,7 +23,7 @@ public class All_Test {
     // 添加常量定义
     private static final int MODEL_PARAM_LENGTH = 5; // 模型参数维度
     private static final int numDO = 5; // 可以设置更大的DO数量
-    private static final int numRounds = 7;// 联邦学习轮次
+    private static final int numRounds = 8;// 联邦学习轮次
     private static final Color[] COLORS = {
             Color.RED, Color.BLUE, Color.GREEN, Color.ORANGE,
             Color.MAGENTA
@@ -77,64 +77,74 @@ public class All_Test {
                 }
                 doObj.updateGlobalModelParams(globalModelParams); // 接收全局模型参数
                 System.out.println("DO " + doObj.getId() + " 更新后的全局模型参数: " + Arrays.toString(globalModelParams));
+
                 doObj.trainModel(); // 本地训练
                 // 记录损失值
                 doLossHistory.get(doObj.getId()).add(doObj.getLastAverageLoss());
+
+                // 第四轮和第七轮：模拟一致性投毒（在训练后投毒）
+                if ((round == 4 || round == 7) && doObj.getId() == 3) {
+                    try {
+                        java.lang.reflect.Field field = DO.class.getDeclaredField("localModelParams");
+                        field.setAccessible(true);
+                        double[] params = (double[]) field.get(doObj);
+                        // 将参数方向反转并放大，作为投毒参数
+                        for (int j = 0; j < params.length; j++) {
+                            params[j] = -params[j] * 5; // 放大5倍并反转方向
+                        }
+                        // 保存修改后的参数到DO对象中
+                        field.set(doObj, params);
+                        System.out.println("DO 3 投毒后的参数: " + Arrays.toString(params));
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                }
+
                 doObj.encryptData(ta.getN(), ta.getG(), ta.getH()); // 加密模型参数
                 csp.receiveData(doObj.getId(), doObj.getEncryptedModelParams()); // 上传加密模型参数
+
+                // 第七轮：DO 3在计算点积时使用精心构建的参数
+                if (round == 7 && doObj.getId() == 3) {
+                    try {
+                        java.lang.reflect.Field field = DO.class.getDeclaredField("localModelParams");
+                        field.setAccessible(true);
+                        // 使用与全局模型参数方向一致的参数
+                        double[] fakeParams = new double[5];
+                        for (int j = 0; j < fakeParams.length; j++) {
+                            // 保持与全局模型参数相同的方向，但稍微调整大小
+                            fakeParams[j] = globalModelParams[j] * 0.9;
+                        }
+                        field.set(doObj, fakeParams);
+                        System.out.println("DO 3 使用精心构建的点积参数: " + Arrays.toString(fakeParams));
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                }
 
                 doObj.calculateProjections(); // 计算投影结果
                 csp.receiveProjections(doObj.getId(), doObj.getProjectionResults()); // 上传投影结果
             }
 
-            // 如果是第三轮次，处理掉线的 DO
-            if (round == 3) {
-                List<Integer> droppedDOs = Arrays.asList(1, 2); // 假设DO 1和DO 2掉线
-                System.out.println("第三轮次：模拟 DO " + droppedDOs + " 掉线");
-
-                // 恢复掉线DO的私钥
-                List<DO> availableDOs = new ArrayList<>();
-                for (DO doObj : doList) {
-                    if (!droppedDOs.contains(doObj.getId())) {
-                        availableDOs.add(doObj);
-                    }
-                }
-                Map<Integer, BigInteger> recoveredKeys = csp.recoverMissingPrivateKeys(droppedDOs, availableDOs);
-                for (int droppedDO : droppedDOs) {
-                    System.out.println("恢复的 DO " + droppedDO + " 私钥: " + recoveredKeys.get(droppedDO));
-                }
-
-                // 使用恢复的私钥对全0数据进行加密并上传
-                for (int droppedDO : droppedDOs) {
-                    BigInteger[] zeroCiphertext = new BigInteger[MODEL_PARAM_LENGTH];
-                    for (int i = 0; i < MODEL_PARAM_LENGTH; i++) {
-                        zeroCiphertext[i] = csp.encryptZeroData(recoveredKeys.get(droppedDO), ta.getN(), ta.getG(),
-                                ta.getH());
-                    }
-                    csp.receiveData(droppedDO, zeroCiphertext);
-                    System.out.println("DO " + droppedDO + " 上传了全0加密数据");
-                }
-            }
-
             // 4. CSP聚合模型参数并解密
             BigInteger[] aggregatedParams = csp.aggregate(ta.getN());
             double[] decryptedParams = null;
-            boolean decryptionFailed = false; // 标记解密是否失败
+            boolean decryptionFailed = false;
             try {
                 decryptedParams = csp.decrypt(aggregatedParams, ta.getLambda(), ta.getN(), ta.getU(), ta.getY());
                 System.out.println("CSP 解密得到的聚合模型参数: " + Arrays.toString(decryptedParams));
             } catch (Exception e) {
                 System.err.println("解密失败，可能是由于第一轮次的随机哈希值导致的错误");
-                decryptionFailed = true; // 解密失败
+                decryptionFailed = true;
             }
 
-            // 如果解密失败，直接跳过本轮训练，使用上一轮的全局模型参数
             if (decryptionFailed) {
                 System.out.println("由于解密失败，本轮次的训练结果将被忽略，继续使用上一轮的全局模型参数");
-                continue; // 跳过本轮次的后续逻辑
+                continue;
             }
 
             // 5. CSP进行投毒检测
+
+            // 其他轮次：使用常规投毒检测
             List<Integer> suspectedDOs = csp.detectPoisoning(decryptedParams);
             if (!suspectedDOs.isEmpty()) {
                 System.out.println("检测到可疑的DO: " + suspectedDOs);

@@ -14,23 +14,29 @@ import org.jfree.chart.plot.XYPlot;
 import org.jfree.chart.renderer.xy.XYLineAndShapeRenderer;
 import org.jfree.data.xy.XYSeries;
 import org.jfree.data.xy.XYSeriesCollection;
+
 import java.awt.Color;
 import java.awt.BasicStroke;
 import java.awt.Font;
 import org.jfree.chart.StandardChartTheme;
 
 public class All_Test {
+    // 记录时间
+    private static long startTime;
+    private static long endTime;
+    // 输出helloword
+
     // 添加常量定义
     private static final int MODEL_PARAM_LENGTH = 5; // 模型参数维度
     private static final int numDO = 5; // 可以设置更大的DO数量
-    private static final int numRounds = 8;// 联邦学习轮次
+    private static final int numRounds = 10;// 联邦学习轮次
     private static final Color[] COLORS = {
             Color.RED, Color.BLUE, Color.GREEN, Color.ORANGE,
             Color.MAGENTA
     };
 
     public static void main(String[] args) {
-
+        startTime = System.currentTimeMillis();
         List<DO> doList = new ArrayList<>();
         CSP csp = null;
 
@@ -206,6 +212,8 @@ public class All_Test {
 
         // 可视化损失曲线
         visualizeLossHistory(doLossHistory, numRounds);
+        endTime = System.currentTimeMillis();
+        System.out.println("程序运行时间：" + (endTime - startTime) + "ms");
     }
 
     /**

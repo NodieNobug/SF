@@ -78,10 +78,10 @@ class TA {
         }
 
         // 输出生成的正交向量
-        // System.out.println("生成的正交向量组：");
-        // for (int i = 0; i < ORTHOGONAL_VECTOR_COUNT; i++) {
-        // System.out.println("向量" + i + ": " + Arrays.toString(orthogonalVectors[i]));
-        // }
+        System.out.println("生成的正交向量组：");
+        for (int i = 0; i < ORTHOGONAL_VECTOR_COUNT; i++) {
+            System.out.println("向量" + i + ": " + Arrays.toString(orthogonalVectors[i]));
+        }
 
         // 检查点积是否为0
         checkOrthogonality();

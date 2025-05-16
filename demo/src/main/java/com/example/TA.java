@@ -6,6 +6,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Random;
 import java.util.Arrays;
+import java.util.List;
+import java.util.ArrayList;
 
 // TA 类：负责全局参数生成、为每个 DO 生成私钥，并将私钥秘密分片分发给其它 DO
 class TA {
@@ -23,7 +25,9 @@ class TA {
     public String hashAlgorithm = "SHA-256";
     private int threshold; // 新增：门限值字段
     private BigInteger R_t; // 新增：存储R_t
+    private List<BigInteger> R_t_history = new ArrayList<>(); // 新增：存储R_t的历史记录
     private BigInteger[] n_i; // 存储所有DO的ni值
+    private BigInteger[] modelParamHashes; // 添加字段存储模型参数哈希值
 
     private static final int ORTHOGONAL_VECTOR_COUNT = 5;
     private static final int MODEL_SIZE = 5; // Define MODEL_SIZE with an appropriate value
@@ -35,6 +39,7 @@ class TA {
     public TA(int numDO, BigInteger[] modelParamHashes) { // 恢复 modelParamHashes 参数
         // 新增：根据DO数量动态设置门限值
         this.threshold = (numDO * 2) / 3; // 设置为总数的2/3，可以根据需求调整
+        this.modelParamHashes = modelParamHashes; // 保存模型参数哈希值
         generateOrthogonalVectors();
         keyGeneration(numDO, modelParamHashes); // 恢复 modelParamHashes 参数
     }
@@ -154,6 +159,8 @@ class TA {
         }
         n_i[numDO - 1] = N.subtract(sum);
 
+        System.out.println("n_i: " + Arrays.toString(n_i));
+
         // 生成随机 R_t，要求与 N 互质
         do {
             R_t = new BigInteger(bitLength, random);
@@ -214,6 +221,14 @@ class TA {
         return R_t;
     }
 
+    // 新增：获取特定轮次的R_t
+    public BigInteger getR_t(int round) {
+        if (round < 0 || round >= R_t_history.size()) {
+            throw new IllegalArgumentException("Invalid round number");
+        }
+        return R_t_history.get(round);
+    }
+
     // 新增：获取特定DO的ni值
     public BigInteger getNi(int doId) {
         return n_i[doId];
@@ -225,5 +240,10 @@ class TA {
 
     public double[][] getOrthogonalVectors() {
         return orthogonalVectors;
+    }
+
+    // 新增：获取模型参数哈希值的方法
+    public BigInteger[] getModelParamHashes() {
+        return modelParamHashes;
     }
 }

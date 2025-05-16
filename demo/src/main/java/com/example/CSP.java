@@ -23,6 +23,7 @@ class CSP {
     public BigInteger aggregatedCiphertext;
     public BigInteger[] aggregatedModelParams;
     private double[][] orthogonalVectors;
+    private BigInteger[] currentModelParamHashes; // 添加字段存储当前轮次的模型参数哈希值
 
     public CSP(TA ta, int totalDO) {
         this.ta = ta;
@@ -60,7 +61,7 @@ class CSP {
         for (int i = 0; i < MODEL_SIZE; i++) {
             aggregatedModelParams[i] = BigInteger.ONE;
             for (BigInteger[] params : receivedModelParams.values()) {
-
+                // 连乘，得到了聚合的模型参数[[X]]
                 aggregatedModelParams[i] = aggregatedModelParams[i].multiply(params[i]).mod(N.multiply(N));
             }
         }
@@ -87,6 +88,7 @@ class CSP {
         for (int i = 0; i < MODEL_SIZE; i++) {
             BigInteger L = aggregated[i].modPow(lambda, N.multiply(N))
                     .subtract(BigInteger.ONE).divide(N);
+
             BigInteger decrypted = L.multiply(u).mod(N).mod(y);
             // System.out.println("解密后的结果" + decrypted);
             // System.out.println("y值是" + y);
@@ -368,6 +370,7 @@ class CSP {
     public void updateTA(TA newTA) {
         this.ta = newTA;
         this.orthogonalVectors = newTA.getOrthogonalVectors();
+        this.currentModelParamHashes = newTA.getModelParamHashes(); // 更新当前轮次的模型参数哈希值
         System.out.println("CSP 更新了TA的全局参数和正交向量");
     }
 
@@ -379,5 +382,189 @@ class CSP {
         receivedProjections.clear();
         System.out.println("CSP 状态已清理，准备进入下一轮联邦学习");
 
+    }
+
+    /**
+     * 二分查找恶意DO
+     * 
+     * @param doIds 当前需要检查的DO ID列表
+     * @param ta    当前轮次的TA对象
+     * @return 恶意DO的ID
+     */
+    public int findMaliciousDO(List<Integer> doIds, TA ta) {
+        // 基本情况：如果只剩一个DO，就是恶意DO
+        if (doIds.size() == 1) {
+            return doIds.get(0);
+        }
+
+        // 将DO列表分成两半
+        int mid = doIds.size() / 2;
+        List<Integer> firstHalf = doIds.subList(0, mid);
+        List<Integer> secondHalf = doIds.subList(mid, doIds.size());
+
+        System.out.println("检查前半部分DO: " + firstHalf);
+        System.out.println("检查后半部分DO: " + secondHalf);
+
+        // 计算前半部分DO的聚合值
+        BigInteger[] firstHalfAggregated = aggregatePartialDOs(firstHalf, ta);
+        double[] firstHalfDecrypted = decryptPartialAggregation(firstHalfAggregated, firstHalf, ta);
+
+        // 计算后半部分DO的聚合值
+        BigInteger[] secondHalfAggregated = aggregatePartialDOs(secondHalf, ta);
+        double[] secondHalfDecrypted = decryptPartialAggregation(secondHalfAggregated, secondHalf, ta);
+
+        // 检查哪一部分的聚合值不一致
+        if (isAggregationConsistent(firstHalfDecrypted, firstHalf)) {
+            System.out.println("前半部分DO的聚合值一致，恶意DO在后半部分");
+            return findMaliciousDO(secondHalf, ta);
+        } else {
+            System.out.println("前半部分DO的聚合值不一致，恶意DO在前半部分");
+            return findMaliciousDO(firstHalf, ta);
+        }
+    }
+
+    /**
+     * 聚合部分DO的加密模型参数
+     */
+    private BigInteger[] aggregatePartialDOs(List<Integer> doIds, TA ta) {
+        BigInteger N = ta.getN();
+        BigInteger N2 = N.multiply(N);
+        BigInteger g = ta.getG();
+        BigInteger h = ta.getH();
+        BigInteger R_t = ta.getR_t(); // 使用当前轮次的R_t
+        BigInteger[] aggregated = new BigInteger[MODEL_SIZE];
+        Arrays.fill(aggregated, BigInteger.ONE);
+
+        // 计算当前要计算的DO的n_i之和
+        BigInteger sumNi = BigInteger.ZERO;
+        for (int doId : doIds) {
+            BigInteger n_i = ta.getNi(doId);
+            sumNi = sumNi.add(n_i);
+        }
+        // 用N减去当前要计算的DO的n_i值的和
+        sumNi = N.subtract(sumNi);
+
+        SecureRandom random = new SecureRandom();
+        BigInteger r = new BigInteger(N.bitLength() / 2, random);
+
+        // 使用当前轮次的R_t构建0密文
+        BigInteger zeroCiphertext = g.modPow(BigInteger.ZERO, N2)
+                .multiply(h.modPow(r, N2));
+
+        // 计算当前要计算的DO的n_i * modelParamHashes之和
+        BigInteger sumNiHashes = BigInteger.ZERO;
+        BigInteger commonModelParamHash = currentModelParamHashes[0]; // 使用第一个DO的哈希值作为共同值
+        for (int doId : doIds) {
+            BigInteger n_i = ta.getNi(doId);
+            // 使用共同的模型参数哈希值
+            sumNiHashes = sumNiHashes.add(n_i.multiply(commonModelParamHash));
+        }
+        // 用N减去当前要计算的DO的n_i * modelParamHashes值的和
+        sumNiHashes = N.multiply(commonModelParamHash).subtract(sumNiHashes);
+
+        // 将R_t的幂次计算加入zeroCiphertext
+        zeroCiphertext = zeroCiphertext.multiply(R_t.modPow(sumNiHashes, N2)).mod(N2);
+
+        // 将0密文作为初始值
+        for (int i = 0; i < MODEL_SIZE; i++) {
+            aggregated[i] = zeroCiphertext;
+        }
+
+        // 然后聚合目标DO的加密参数
+        for (int doId : doIds) {
+            BigInteger[] encryptedParams = receivedModelParams.get(doId);
+            for (int i = 0; i < MODEL_SIZE; i++) {
+                aggregated[i] = aggregated[i].multiply(encryptedParams[i]).mod(N2);
+            }
+        }
+
+        return aggregated;
+    }
+
+    /**
+     * 解密部分DO的聚合值
+     */
+    private double[] decryptPartialAggregation(BigInteger[] aggregated, List<Integer> doIds, TA ta) {
+        BigInteger N = ta.getN();
+        BigInteger N2 = N.multiply(N);
+        BigInteger lambda = ta.getLambda();
+        BigInteger u = ta.getU();
+        BigInteger y = ta.getY();
+
+        double[] decryptedParams = new double[MODEL_SIZE];
+
+        System.out.println("\n当前检查的DO: " + doIds);
+        System.out.println("部分DO聚合后的加密模型参数:");
+
+        for (int i = 0; i < MODEL_SIZE; i++) {
+            // 解密过程
+            BigInteger L = aggregated[i].modPow(lambda, N2)
+                    .subtract(BigInteger.ONE).divide(N);
+
+            // 修改：只使用mod(y)，移除mod(N)
+            BigInteger decrypted = L.multiply(u).mod(N).mod(y);
+
+            // 处理负数情况
+            if (decrypted.compareTo(y.divide(BigInteger.TWO)) > 0) {
+                decrypted = decrypted.subtract(y);
+            }
+
+            decryptedParams[i] = decrypted.doubleValue() / 1000000.0;
+            System.out.println("解密后的模型参数 " + i + ": " + decryptedParams[i]);
+        }
+
+        return decryptedParams;
+    }
+
+    /**
+     * 检查聚合值是否一致
+     */
+    private boolean isAggregationConsistent(double[] params, List<Integer> doIds) {
+        // 1. 使用参数与正交向量组计算点积
+        double[] cspDotProducts = new double[orthogonalVectors.length];
+        for (int i = 0; i < orthogonalVectors.length; i++) {
+            double dotProduct = 0;
+            for (int j = 0; j < MODEL_SIZE; j++) {
+                dotProduct += orthogonalVectors[i][j] * params[j];
+            }
+            cspDotProducts[i] = dotProduct;
+        }
+
+        // 2. 计算选定DO的投影结果聚合
+        double[] doDotProducts = new double[orthogonalVectors.length];
+        for (int i = 0; i < orthogonalVectors.length; i++) {
+            doDotProducts[i] = 0;
+            // 只计算当前检查的DO的投影结果
+            for (int doId : doIds) {
+                if (receivedProjections.containsKey(doId)) {
+                    doDotProducts[i] += receivedProjections.get(doId)[i];
+                }
+            }
+        }
+
+        // 3. 比较两个结果是否一致（考虑浮点数误差）
+        double threshold = 1e-3;
+        System.out.println("\n当前部分DO聚合参数计算的点积结果: " + Arrays.toString(cspDotProducts));
+        System.out.println("当前部分DO上传的点积结果聚合: " + Arrays.toString(doDotProducts));
+
+        // 计算相对误差
+        for (int i = 0; i < cspDotProducts.length; i++) {
+            double absoluteError = Math.abs(cspDotProducts[i] - doDotProducts[i]);
+            double relativeError = 0;
+
+            if (Math.abs(cspDotProducts[i]) > 1e-10) {
+                relativeError = absoluteError / Math.abs(cspDotProducts[i]);
+            } else if (Math.abs(doDotProducts[i]) > 1e-10) {
+                relativeError = absoluteError / Math.abs(doDotProducts[i]);
+            } else {
+                relativeError = absoluteError;
+            }
+
+            if (relativeError > threshold) {
+                System.out.printf("索引 %d 的相对误差: %.10f\n", i, relativeError);
+                return false;
+            }
+        }
+        return true;
     }
 }

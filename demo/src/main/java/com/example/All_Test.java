@@ -24,17 +24,17 @@ public class All_Test {
     // 记录时间
     private static long startTime;
     private static long endTime;
-    // 输出helloword
 
     // 添加常量定义
     private static final int MODEL_PARAM_LENGTH = 5; // 模型参数维度
-    private static final int numDO = 5; // 可以设置更大的DO数量
-    private static final int numRounds = 10;// 联邦学习轮次
+    private static final int numDO = 7; // 可以设置更大的DO数量
+    private static final int numRounds = 9;// 联邦学习轮次
     private static final Color[] COLORS = {
             Color.RED, Color.BLUE, Color.GREEN, Color.ORANGE,
             Color.MAGENTA
     };
 
+    // 记录时间
     public static void main(String[] args) {
         startTime = System.currentTimeMillis();
         List<DO> doList = new ArrayList<>();
@@ -110,7 +110,7 @@ public class All_Test {
                 csp.receiveData(doObj.getId(), doObj.getEncryptedModelParams()); // 上传加密模型参数
 
                 // 第七轮：DO 3在计算点积时使用精心构建的参数
-                if (round == 7 && doObj.getId() == 3) {
+                if (round == 7 && doObj.getId() == 2) {
                     try {
                         java.lang.reflect.Field field = DO.class.getDeclaredField("localModelParams");
                         field.setAccessible(true);
@@ -149,8 +149,6 @@ public class All_Test {
             }
 
             // 5. CSP进行投毒检测
-
-            // 其他轮次：使用常规投毒检测
             List<Integer> suspectedDOs = csp.detectPoisoning(decryptedParams);
             if (!suspectedDOs.isEmpty()) {
                 System.out.println("检测到可疑的DO: " + suspectedDOs);
@@ -158,7 +156,29 @@ public class All_Test {
                 System.out.println("未检测到投毒行为");
             }
 
-            // 6. 计算全局模型参数并分发给DO
+            // 6. 只在第7轮检测到不一致时使用二分查找
+            if (round == 7 && !isAggregationConsistent(decryptedParams)) {
+                System.out.println("\n第7轮检测到聚合结果不一致，开始二分查找恶意DO...");
+                List<Integer> allDOIds = new ArrayList<>();
+                for (int i = 0; i < numDO; i++) {
+                    if (!(round == 3 && Arrays.asList(1, 2).contains(i))) { // 排除掉线的DO
+                        allDOIds.add(i);
+                    }
+                }
+                int maliciousDOId = csp.findMaliciousDO(allDOIds, ta);
+                System.out.println("找到恶意DO: " + maliciousDOId);
+
+                // 从聚合中移除恶意DO的贡献
+                BigInteger[] maliciousDOParams = csp.receivedModelParams.get(maliciousDOId);
+                for (int i = 0; i < MODEL_PARAM_LENGTH; i++) {
+                    aggregatedParams[i] = aggregatedParams[i]
+                            .multiply(maliciousDOParams[i].modInverse(ta.getN().multiply(ta.getN())))
+                            .mod(ta.getN().multiply(ta.getN()));
+                }
+
+            }
+
+            // 7. 计算全局模型参数并分发给DO
             if (round == 3) {
                 // 第三轮次：模拟两个DO掉线
                 List<Integer> droppedDOs = Arrays.asList(1, 2); // 假设DO 1和DO 2掉线
@@ -197,14 +217,16 @@ public class All_Test {
             } else {
                 globalModelParams = csp.calculateAverage(decryptedParams, numDO); // 基于总DO数量求均值
             }
-            System.out.println("CSP 分发的全局模型参数: " + Arrays.toString(globalModelParams));
 
+            System.out.println("CSP 分发的全局模型参数: " + Arrays.toString(globalModelParams));
             // 记录当前轮次的模型参数
             globalModelHistory.add(Arrays.copyOf(globalModelParams, globalModelParams.length));
 
             // 7. 清理CSP状态
             csp.clearState();
         }
+
+        // 仅为了输出结果，方便查看
         for (double[] globalModelHistory2 : globalModelHistory) {
             System.out.println("轮次 " + (globalModelHistory.indexOf(globalModelHistory2) + 1) + ": "
                     + Arrays.toString(globalModelHistory2));
@@ -299,5 +321,19 @@ public class All_Test {
         frame.pack();
         frame.setLocationRelativeTo(null);
         frame.setVisible(true);
+    }
+
+    /**
+     * 检查聚合值是否一致
+     */
+    private static boolean isAggregationConsistent(double[] params) {
+        // 计算与预期值的差异
+        double threshold = 1e-3;
+        for (int i = 0; i < params.length; i++) {
+            if (Math.abs(params[i]) > threshold) {
+                return false;
+            }
+        }
+        return true;
     }
 }

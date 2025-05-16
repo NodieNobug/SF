@@ -23,13 +23,14 @@ public class SafeMulTest {
         // Step1: PA生成参数
         BigInteger p = BigInteger.probablePrime(k1, random);
         BigInteger alpha = BigInteger.probablePrime(k2, random);
+
         int[] a_ext = Arrays.copyOf(a, n + 2); // a_{n+1}, a_{n+2} = 0
         BigInteger s = new BigInteger(k1 - 2, random).add(BigInteger.ONE); // s ∈ Z_p
         BigInteger[] c = new BigInteger[n + 2];
         for (int i = 0; i < n + 2; i++) {
             c[i] = new BigInteger(k3, random);
         }
-        BigInteger[] C = new BigInteger[n + 2];
+        BigInteger[] C = new BigInteger[n + 2];// A传输的密文
         for (int i = 0; i < n + 2; i++) {
             if (a_ext[i] != 0) {
                 C[i] = s.multiply(BigInteger.valueOf(a_ext[i]).multiply(alpha).add(c[i])).mod(p);

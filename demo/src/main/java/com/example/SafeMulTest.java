@@ -8,8 +8,14 @@ public class SafeMulTest {
     public static void main(String[] args) {
         // 向量长度
         int n = 5;
-        // PA持有的向量a
-        int[] a = { 3, 2, 5, 1, 4 };
+        // PA持有的向量组a，每个向量长度为5
+        int[][] a = {
+                { 3, 2, 5, 1, 4 },
+                { 2, 3, 4, 1, 6 },
+                { 1, 5, 3, 2, 4 },
+                { 4, 2, 1, 5, 3 },
+                { 3, 4, 5, 2, 1 }
+        };
         // PB持有的向量b
         int[] b = { 6, 1, 2, 3, 5 };
 
@@ -23,77 +29,87 @@ public class SafeMulTest {
         // Step1: PA生成参数
         BigInteger p = BigInteger.probablePrime(k1, random);
         BigInteger alpha = BigInteger.probablePrime(k2, random);
-
-        int[] a_ext = Arrays.copyOf(a, n + 2); // a_{n+1}, a_{n+2} = 0
         BigInteger s = new BigInteger(k1 - 2, random).add(BigInteger.ONE); // s ∈ Z_p
-        BigInteger[] c = new BigInteger[n + 2];
-        for (int i = 0; i < n + 2; i++) {
-            c[i] = new BigInteger(k3, random);
-        }
-        BigInteger[] C = new BigInteger[n + 2];// A传输的密文
-        for (int i = 0; i < n + 2; i++) {
-            if (a_ext[i] != 0) {
-                C[i] = s.multiply(BigInteger.valueOf(a_ext[i]).multiply(alpha).add(c[i])).mod(p);
-            } else {
-                C[i] = s.multiply(c[i]).mod(p);
+        BigInteger s_inv = s.modInverse(p);
+
+        // PA为每个向量生成密文
+        BigInteger[][] C = new BigInteger[a.length][n + 2];
+        BigInteger[][] c = new BigInteger[a.length][n + 2];
+
+        for (int vecIndex = 0; vecIndex < a.length; vecIndex++) {
+            int[] a_ext = Arrays.copyOf(a[vecIndex], n + 2); // 每个向量扩展两位
+            for (int i = 0; i < n + 2; i++) {
+                c[vecIndex][i] = new BigInteger(k3, random);
+                if (a_ext[i] != 0) {
+                    C[vecIndex][i] = s.multiply(BigInteger.valueOf(a_ext[i]).multiply(alpha).add(c[vecIndex][i]))
+                            .mod(p);
+                } else {
+                    C[vecIndex][i] = s.multiply(c[vecIndex][i]).mod(p);
+                }
             }
         }
-        BigInteger A = BigInteger.ZERO;
-        for (int i = 0; i < n; i++) {
-            A = A.add(BigInteger.valueOf(a[i]).pow(2));
-        }
-        BigInteger s_inv = s.modInverse(p);
-        // PA发送(alpha, p, C[0..n+1])给PB
 
+        // PA发送(alpha, p, C[0..a.length-1][0..n+1])给PB
         System.out.println("p: " + p);
         System.out.println("alpha: " + alpha);
         System.out.println("s: " + s);
         System.out.println("s_inv: " + s_inv);
-        System.out.println("a_ext: " + Arrays.toString(a_ext));
-        System.out.println("c: " + Arrays.toString(c));
-        System.out.println("C: " + Arrays.toString(C));
+        for (BigInteger[] c2 : C) {
+            for (BigInteger c22 : c2) {
+                System.out.print(c22 + " ");
+            }
+            System.out.println("");
+        }
 
         // Step2: PB处理
-        int[] b_ext = Arrays.copyOf(b, n + 2); // b_{n+1}, b_{n+2} = 0
-        BigInteger[] D = new BigInteger[n + 2];
-        for (int i = 0; i < n + 2; i++) {
-            if (b_ext[i] != 0) {
-                D[i] = BigInteger.valueOf(b_ext[i]).multiply(alpha).multiply(C[i]).mod(p);
-            } else {
-                BigInteger r = new BigInteger(k4, random);
-                D[i] = r.multiply(C[i]).mod(p);
+        int[] b_ext = Arrays.copyOf(b, n + 2); // b扩展两位
+        BigInteger[] D_sums = new BigInteger[a.length];
+
+        for (int vecIndex = 0; vecIndex < a.length; vecIndex++) {
+            BigInteger[] D = new BigInteger[n + 2];
+            for (int i = 0; i < n + 2; i++) {
+                if (b_ext[i] != 0) {
+                    D[i] = BigInteger.valueOf(b_ext[i]).multiply(alpha).multiply(C[vecIndex][i]).mod(p);
+                } else {
+                    BigInteger r = new BigInteger(k4, random);
+                    D[i] = r.multiply(C[vecIndex][i]).mod(p);
+                }
             }
-        }
-        BigInteger B = BigInteger.ZERO;
-        for (int i = 0; i < n; i++) {
-            B = B.add(BigInteger.valueOf(b[i]).pow(2));
-        }
-        BigInteger D_sum = BigInteger.ZERO;
-        for (int i = 0; i < n + 2; i++) {
-            D_sum = D_sum.add(D[i]);
-        }
-        D_sum = D_sum.mod(p);
-        // PB发送(B, D_sum)给PA
+            BigInteger D_sum = BigInteger.ZERO;
+            for (int i = 0; i < n + 2; i++) {
+                D_sum = D_sum.add(D[i]);
+            }
+            D_sums[vecIndex] = D_sum.mod(p);
 
-        System.out.println("b_ext: " + Arrays.toString(b_ext));
-        System.out.println("D: " + Arrays.toString(D));
-        System.out.println("D_sum: " + D_sum);
+        }
+        // PB发送所有D_sum给PA
 
-        // Step3: PA计算
-        BigInteger E = s_inv.multiply(D_sum).mod(p);
-        // 点积结果
+        // Step3: PA计算所有向量的点积
+        BigInteger[] results = new BigInteger[a.length];
         BigInteger alpha2 = alpha.multiply(alpha);
-        BigInteger inner = E.subtract(E.mod(alpha2)).divide(alpha2);
-        System.out.println("E: " + E);
-        System.out.println("alpha^2: " + alpha2);
-        System.out.println("E mod alpha^2: " + E.mod(alpha2));
-        System.out.println("E - (E mod alpha^2): " + E.subtract(E.mod(alpha2)));
-        System.out.println("inner: " + inner);
-        // 验证正确性
-        int plainInner = 0;
-        for (int i = 0; i < n; i++) {
-            plainInner += a[i] * b[i];
+
+        for (int vecIndex = 0; vecIndex < a.length; vecIndex++) {
+            BigInteger E = s_inv.multiply(D_sums[vecIndex]).mod(p);
+            BigInteger inner = E.subtract(E.mod(alpha2)).divide(alpha2);
+            results[vecIndex] = inner;
+
+            // 验证正确性
+            int plainInner = 0;
+            for (int i = 0; i < n; i++) {
+                plainInner += a[vecIndex][i] * b[i];
+            }
+
+            System.out.println("\n向量 " + (vecIndex + 1) + " 的计算结果:");
+            System.out.println("D_sum: " + D_sums[vecIndex]);
+            System.out.println("E: " + E);
+            System.out.println("点积结果: " + inner);
+            System.out.println("明文点积结果: " + plainInner);
         }
-        System.out.println("明文点积结果: " + plainInner);
+
+        // 输出所有向量的点积结果
+        System.out.println("\n所有向量的点积结果汇总:");
+        for (int i = 0; i < results.length; i++) {
+            System.out.println("向量 " + (i + 1) + " 的点积: " + results[i]);
+        }
     }
 }

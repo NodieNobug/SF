@@ -9,15 +9,18 @@ public class SafeMulTest {
         // 向量长度
         int n = 5;
         // PA持有的向量组a，每个向量长度为5
-        int[][] a = {
-                { 3, 2, 5, 1, 4 },
-                { 2, 3, 4, 1, 6 },
-                { 1, 5, 3, 2, 4 },
-                { 4, 2, 1, 5, 3 },
-                { 3, 4, 5, 2, 1 }
+        double[][] a = {
+                { 3.14, 2.71, 5.55, 1.41, 4.20 },
+                { 2.22, 3.33, 4.44, 1.11, 6.66 },
+                { 1.23, 5.67, 3.21, 2.34, 4.56 },
+                { 4.32, 2.12, 1.98, 5.43, 3.45 },
+                { 3.87, 4.16, 5.89, 2.71, 1.62 }
         };
         // PB持有的向量b
-        int[] b = { 6, 1, 2, 3, 5 };
+        double[] b = { 6.28, 1.73, 2.51, 3.14, 5.92 };
+
+        // 精度放大因子
+        long PRECISION_FACTOR = 1000000;
 
         // 安全参数
         int k1 = 128; // p的比特长度 建议128以上
@@ -37,12 +40,12 @@ public class SafeMulTest {
         BigInteger[][] c = new BigInteger[a.length][n + 2];
 
         for (int vecIndex = 0; vecIndex < a.length; vecIndex++) {
-            int[] a_ext = Arrays.copyOf(a[vecIndex], n + 2); // 每个向量扩展两位
+            double[] a_temp = Arrays.copyOf(a[vecIndex], n + 2); // 每个向量扩展两位
             for (int i = 0; i < n + 2; i++) {
                 c[vecIndex][i] = new BigInteger(k3, random);
-                if (a_ext[i] != 0) {
-                    C[vecIndex][i] = s.multiply(BigInteger.valueOf(a_ext[i]).multiply(alpha).add(c[vecIndex][i]))
-                            .mod(p);
+                if (i < n) { // 只处理原始向量部分
+                    BigInteger scaledValue = BigInteger.valueOf((long) (a_temp[i] * PRECISION_FACTOR));
+                    C[vecIndex][i] = s.multiply(scaledValue.multiply(alpha).add(c[vecIndex][i])).mod(p);
                 } else {
                     C[vecIndex][i] = s.multiply(c[vecIndex][i]).mod(p);
                 }
@@ -62,14 +65,15 @@ public class SafeMulTest {
         }
 
         // Step2: PB处理
-        int[] b_ext = Arrays.copyOf(b, n + 2); // b扩展两位
+        double[] b_ext = Arrays.copyOf(b, n + 2); // b扩展两位
         BigInteger[] D_sums = new BigInteger[a.length];
 
         for (int vecIndex = 0; vecIndex < a.length; vecIndex++) {
             BigInteger[] D = new BigInteger[n + 2];
             for (int i = 0; i < n + 2; i++) {
-                if (b_ext[i] != 0) {
-                    D[i] = BigInteger.valueOf(b_ext[i]).multiply(alpha).multiply(C[vecIndex][i]).mod(p);
+                if (i < n) { // 只处理原始向量部分
+                    BigInteger scaledValue = BigInteger.valueOf((long) (b_ext[i] * PRECISION_FACTOR));
+                    D[i] = scaledValue.multiply(alpha).multiply(C[vecIndex][i]).mod(p);
                 } else {
                     BigInteger r = new BigInteger(k4, random);
                     D[i] = r.multiply(C[vecIndex][i]).mod(p);
@@ -85,25 +89,27 @@ public class SafeMulTest {
         // PB发送所有D_sum给PA
 
         // Step3: PA计算所有向量的点积
-        BigInteger[] results = new BigInteger[a.length];
+        Double[] results = new Double[a.length];
         BigInteger alpha2 = alpha.multiply(alpha);
 
+        // PA计算结果时需要考虑精度还原
         for (int vecIndex = 0; vecIndex < a.length; vecIndex++) {
             BigInteger E = s_inv.multiply(D_sums[vecIndex]).mod(p);
             BigInteger inner = E.subtract(E.mod(alpha2)).divide(alpha2);
-            results[vecIndex] = inner;
+            // 还原精度
+            double actualResult = inner.doubleValue() / (PRECISION_FACTOR * PRECISION_FACTOR);
+            results[vecIndex] = actualResult;
 
             // 验证正确性
-            int plainInner = 0;
+            double plainInner = 0.0;
             for (int i = 0; i < n; i++) {
                 plainInner += a[vecIndex][i] * b[i];
             }
 
             System.out.println("\n向量 " + (vecIndex + 1) + " 的计算结果:");
-            System.out.println("D_sum: " + D_sums[vecIndex]);
-            System.out.println("E: " + E);
-            System.out.println("点积结果: " + inner);
+            System.out.println("点积结果: " + actualResult);
             System.out.println("明文点积结果: " + plainInner);
+            System.out.println("相对误差: " + Math.abs((actualResult - plainInner) / plainInner));
         }
 
         // 输出所有向量的点积结果

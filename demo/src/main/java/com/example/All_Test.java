@@ -69,18 +69,30 @@ public class All_Test {
                 csp = new CSP(ta, numDO);
             } else {
                 for (DO doObj : doList) {
-                    doObj.updateTA(ta); // 更新TA参数
+                    if (doObj != null) { // 添加null检查
+                        doObj.updateTA(ta); // 只有当DO不为null时才更新TA参数
+                    }
                 }
                 csp.updateTA(ta); // 更新CSP的TA参数
             }
 
             // 3. DO接收全局模型参数并进行本地训练
-            for (DO doObj : doList) {
-                if (round == 3 && Arrays.asList(1, 2).contains(doObj.getId())) {
-                    // 第三轮次：跳过掉线的 DO
-                    System.out.println("DO " + doObj.getId() + " 掉线，跳过训练和上传");
+            for (int i = 0; i < doList.size(); i++) {
+                DO doObj = doList.get(i);
+                if (round == 3 && Arrays.asList(1, 2).contains(i)) {
+                    // 第三轮次：将掉线的DO设置为null
+                    doList.set(i, null);
+                    System.out.println("DO " + i + " 掉线");
                     continue;
+                } else if (round == 4 && doList.get(i) == null) {
+                    // 第四轮：恢复掉线的DO
+                    doList.set(i, new DO(i, ta));
+                    doObj = doList.get(i);
+                    System.out.println("DO " + i + " 恢复在线");
                 }
+                if (doObj == null)
+                    continue;
+
                 doObj.updateGlobalModelParams(globalModelParams); // 接收全局模型参数
                 System.out.println("DO " + doObj.getId() + " 更新后的全局模型参数: " + Arrays.toString(globalModelParams));
 
@@ -107,10 +119,10 @@ public class All_Test {
                 }
 
                 doObj.encryptData(ta.getN(), ta.getG(), ta.getH()); // 加密模型参数
-                csp.receiveData(doObj.getId(), doObj.getEncryptedModelParams()); // 上传加密模型参数
+                csp.receiveData(doObj.getId(), doObj.getEncryptedModelParams()); // 获取加密模型参数
 
                 // 第七轮：DO 3在计算点积时使用精心构建的参数
-                if (round == 7 && doObj.getId() == 2) {
+                if (round == 7 && doObj.getId() == 3) {
                     try {
                         java.lang.reflect.Field field = DO.class.getDeclaredField("localModelParams");
                         field.setAccessible(true);
@@ -128,7 +140,7 @@ public class All_Test {
                 }
 
                 doObj.calculateProjections(); // 计算投影结果
-                csp.receiveProjections(doObj.getId(), doObj.getProjectionResults()); // 上传投影结果
+                csp.receiveProjections(doObj.getId(), doObj.getProjectionResults()); // 获取投影结果
             }
 
             // 4. CSP聚合模型参数并解密
@@ -180,12 +192,13 @@ public class All_Test {
 
             // 7. 计算全局模型参数并分发给DO
             if (round == 3) {
-                // 第三轮次：模拟两个DO掉线
-                List<Integer> droppedDOs = Arrays.asList(1, 2); // 假设DO 1和DO 2掉线
-                System.out.println("第三轮次：模拟 DO " + droppedDOs + " 掉线");
+                // 让CSP检测掉线的DO
+                List<Integer> droppedDOs = csp.detectDroppedDOs(doList);
+                System.out.println("CSP检测到掉线的DO: " + droppedDOs);
+
                 List<DO> availableDOs = new ArrayList<>();
                 for (DO doObj : doList) {
-                    if (!droppedDOs.contains(doObj.getId())) {
+                    if (doObj != null) {
                         availableDOs.add(doObj);
                     }
                 }
@@ -233,7 +246,7 @@ public class All_Test {
         }
 
         // 可视化损失曲线
-        visualizeLossHistory(doLossHistory, numRounds);
+        // visualizeLossHistory(doLossHistory, numRounds);
         endTime = System.currentTimeMillis();
         System.out.println("程序运行时间：" + (endTime - startTime) + "ms");
     }
@@ -260,68 +273,69 @@ public class All_Test {
     /**
      * 可视化每个DO的损失曲线
      */
-    private static void visualizeLossHistory(Map<Integer, List<Double>> doLossHistory, int numRounds) {
-        // 设置中文主题
-        StandardChartTheme chartTheme = new StandardChartTheme("CN");
-        // 设置图表标题字体
-        chartTheme.setExtraLargeFont(new Font("黑体", Font.BOLD, 20));
-        // 设置轴标签字体
-        chartTheme.setLargeFont(new Font("黑体", Font.BOLD, 16));
-        // 设置图例字体
-        chartTheme.setRegularFont(new Font("宋体", Font.PLAIN, 12));
-        // 应用主题
-        ChartFactory.setChartTheme(chartTheme);
+    // private static void visualizeLossHistory(Map<Integer, List<Double>>
+    // doLossHistory, int numRounds) {
+    // // 设置中文主题
+    // StandardChartTheme chartTheme = new StandardChartTheme("CN");
+    // // 设置图表标题字体
+    // chartTheme.setExtraLargeFont(new Font("黑体", Font.BOLD, 20));
+    // // 设置轴标签字体
+    // chartTheme.setLargeFont(new Font("黑体", Font.BOLD, 16));
+    // // 设置图例字体
+    // chartTheme.setRegularFont(new Font("宋体", Font.PLAIN, 12));
+    // // 应用主题
+    // ChartFactory.setChartTheme(chartTheme);
 
-        XYSeriesCollection dataset = new XYSeriesCollection();
+    // XYSeriesCollection dataset = new XYSeriesCollection();
 
-        // 为每个DO创建一个数据系列
-        for (Map.Entry<Integer, List<Double>> entry : doLossHistory.entrySet()) {
-            XYSeries series = new XYSeries("DO " + entry.getKey());
-            List<Double> losses = entry.getValue();
-            for (int round = 0; round < losses.size(); round++) {
-                series.add(round + 1, losses.get(round));
-            }
-            dataset.addSeries(series);
-        }
+    // // 为每个DO创建一个数据系列
+    // for (Map.Entry<Integer, List<Double>> entry : doLossHistory.entrySet()) {
+    // XYSeries series = new XYSeries("DO " + entry.getKey());
+    // List<Double> losses = entry.getValue();
+    // for (int round = 0; round < losses.size(); round++) {
+    // series.add(round + 1, losses.get(round));
+    // }
+    // dataset.addSeries(series);
+    // }
 
-        // 创建图表
-        JFreeChart chart = ChartFactory.createXYLineChart(
-                "联邦学习训练损失曲线",
-                "训练轮次",
-                "训练损失值",
-                dataset,
-                PlotOrientation.VERTICAL,
-                true,
-                true,
-                false);
+    // // 创建图表
+    // JFreeChart chart = ChartFactory.createXYLineChart(
+    // "联邦学习训练损失曲线",
+    // "训练轮次",
+    // "训练损失值",
+    // dataset,
+    // PlotOrientation.VERTICAL,
+    // true,
+    // true,
+    // false);
 
-        // 自定义图表外观
-        XYPlot plot = chart.getXYPlot();
-        XYLineAndShapeRenderer renderer = new XYLineAndShapeRenderer();
+    // // 自定义图表外观
+    // XYPlot plot = chart.getXYPlot();
+    // XYLineAndShapeRenderer renderer = new XYLineAndShapeRenderer();
 
-        // 为每个DO设置不同的颜色
-        for (int i = 0; i < dataset.getSeriesCount(); i++) {
-            renderer.setSeriesPaint(i, COLORS[i % COLORS.length]);
-            renderer.setSeriesStroke(i, new BasicStroke(2.0f));
-        }
+    // // 为每个DO设置不同的颜色
+    // for (int i = 0; i < dataset.getSeriesCount(); i++) {
+    // renderer.setSeriesPaint(i, COLORS[i % COLORS.length]);
+    // renderer.setSeriesStroke(i, new BasicStroke(2.0f));
+    // }
 
-        plot.setRenderer(renderer);
-        plot.setBackgroundPaint(Color.WHITE);
-        plot.setRangeGridlinesVisible(true);
-        plot.setRangeGridlinePaint(Color.LIGHT_GRAY);
-        plot.setDomainGridlinesVisible(true);
-        plot.setDomainGridlinePaint(Color.LIGHT_GRAY);
+    // plot.setRenderer(renderer);
+    // plot.setBackgroundPaint(Color.WHITE);
+    // plot.setRangeGridlinesVisible(true);
+    // plot.setRangeGridlinePaint(Color.LIGHT_GRAY);
+    // plot.setDomainGridlinesVisible(true);
+    // plot.setDomainGridlinePaint(Color.LIGHT_GRAY);
 
-        // 显示图表
-        JFrame frame = new JFrame("损失曲线");
-        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        ChartPanel chartPanel = new ChartPanel(chart);
-        chartPanel.setPreferredSize(new java.awt.Dimension(800, 600));
-        frame.setContentPane(chartPanel);
-        frame.pack();
-        frame.setLocationRelativeTo(null);
-        frame.setVisible(true);
-    }
+    // // 显示图表
+    // JFrame frame = new JFrame("损失曲线");
+    // frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+    // ChartPanel chartPanel = new ChartPanel(chart);
+    // chartPanel.setPreferredSize(new java.awt.Dimension(800, 600));
+    // frame.setContentPane(chartPanel);
+    // frame.pack();
+    // frame.setLocationRelativeTo(null);
+    // frame.setVisible(true);
+    // }
 
     /**
      * 检查聚合值是否一致

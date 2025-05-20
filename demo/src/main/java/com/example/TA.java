@@ -32,6 +32,8 @@ class TA {
     private static final int ORTHOGONAL_VECTOR_COUNT = 5;
     private static final int MODEL_SIZE = 5; // Define MODEL_SIZE with an appropriate value
     private double[][] orthogonalVectors;
+    private double[][] orthogonalVectorsForCSP; // 存储分给CSP的向量组部分
+    private double[][] orthogonalVectorsForDO; // 存储分给DO的向量组部分
 
     /**
      * 构造 TA 对象，numDO 表示参与联邦学习的 DO 数量。
@@ -90,6 +92,32 @@ class TA {
 
         // 检查点积是否为0
         checkOrthogonality();
+
+        // 在检查正交性之后，进行向量分割
+        orthogonalVectorsForCSP = new double[ORTHOGONAL_VECTOR_COUNT][MODEL_SIZE];
+        orthogonalVectorsForDO = new double[ORTHOGONAL_VECTOR_COUNT][MODEL_SIZE];
+
+        Random splitRand = new Random();
+        for (int i = 0; i < ORTHOGONAL_VECTOR_COUNT; i++) {
+            for (int j = 0; j < MODEL_SIZE; j++) {
+                // 随机分割每个向量的每个分量
+                double value = orthogonalVectors[i][j];
+                double ratio = splitRand.nextDouble(); // 生成0-1之间的随机数
+                orthogonalVectorsForCSP[i][j] = value * ratio;
+                orthogonalVectorsForDO[i][j] = value * (1 - ratio);
+            }
+        }
+
+        // 打印分割后的向量组（用于调试）
+        System.out.println("CSP的向量组部分：");
+        for (int i = 0; i < ORTHOGONAL_VECTOR_COUNT; i++) {
+            System.out.println("向量" + i + ": " + Arrays.toString(orthogonalVectorsForCSP[i]));
+        }
+
+        System.out.println("DO的向量组部分：");
+        for (int i = 0; i < ORTHOGONAL_VECTOR_COUNT; i++) {
+            System.out.println("向量" + i + ": " + Arrays.toString(orthogonalVectorsForDO[i]));
+        }
     }
 
     // 归一化向量
@@ -158,8 +186,6 @@ class TA {
             sum = sum.add(n_i[i]);
         }
         n_i[numDO - 1] = N.subtract(sum);
-
-        System.out.println("n_i: " + Arrays.toString(n_i));
 
         // 生成随机 R_t，要求与 N 互质
         do {
@@ -240,6 +266,15 @@ class TA {
 
     public double[][] getOrthogonalVectors() {
         return orthogonalVectors;
+    }
+
+    // 新增获取分割向量的方法
+    public double[][] getOrthogonalVectorsForCSP() {
+        return orthogonalVectorsForCSP;
+    }
+
+    public double[][] getOrthogonalVectorsForDO() {
+        return orthogonalVectorsForDO;
     }
 
     // 新增：获取模型参数哈希值的方法

@@ -13,10 +13,12 @@ class DO {
     private BigInteger myPrivateKey; // 存储自己的私钥
     private Map<Integer, BigInteger> receivedKeyShares = new HashMap<>(); // 存储其他DO的私钥分片
     private double[][] orthogonalVectors; // 正交向量组
+    private double[][] orthogonalVectorsForDo; // 存储分给CSP的向量组部分
     private static int MODEL_SIZE = 5; // 模型参数大小：4个权重 + 1个偏置
     private double[] localModelParams; // 存储本地模型参数
     private BigInteger[] encryptedModelParams; // 存储加密后的模型参数数组
     private double[] projectionResults;
+    private BigInteger dot_r; // 新增：安全点积随机数r
 
     // 新增用于数据处理的成员变量
     private List<double[]> processedData = new ArrayList<>();
@@ -31,6 +33,7 @@ class DO {
         this.ta = ta;
         this.myPrivateKey = ta.doPrivateKeys.get(id); // 获取自己的私钥
         this.orthogonalVectors = ta.getOrthogonalVectors(); // 获取正交向量组
+        this.orthogonalVectorsForDo = ta.getOrthogonalVectorsForDO(); // 获取分给DO的向量组部分
 
         // 存储分给本DO的所有其他DO的私钥分片
         for (Map.Entry<Integer, Map<Integer, BigInteger>> entry : ta.doKeyShares.entrySet()) {
@@ -95,7 +98,7 @@ class DO {
             }
         }
 
-        System.out.println("DO " + id + " 已随机加载 " + processedCount + " 条训练数据");
+        // System.out.println("DO " + id + " 已随机加载 " + processedCount + " 条训练数据");
 
         // 验证正负样本比例
         int positiveCount = 0;
@@ -103,8 +106,8 @@ class DO {
             if (label == 1)
                 positiveCount++;
         }
-        System.out.println("DO " + id + " 正样本比例: " +
-                String.format("%.2f%%", (positiveCount * 100.0 / processedCount)));
+        // System.out.println("DO " + id + " 正样本比例: " +
+        // String.format("%.2f%%", (positiveCount * 100.0 / processedCount)));
     }
 
     /**
@@ -195,10 +198,10 @@ class DO {
                 localModelParams[MODEL_SIZE - 1] -= learningRate * error;
             }
 
-            if (epoch % 10 == 0) {
-                System.out.println("DO " + id + " Epoch " + epoch +
-                        " 平均损失: " + totalLoss / dataSize);
-            }
+            // if (epoch % 10 == 0) {
+            // System.out.println("DO " + id + " Epoch " + epoch +
+            // " 平均损失: " + totalLoss / dataSize);
+            // }
             totalEpochLoss = totalLoss / dataSize;
         }
 
@@ -266,6 +269,103 @@ class DO {
             projectionResults[i] = dotProduct;
         }
         System.out.println("DO " + id + " 的点积结果（模型参数在各正交向量上的投影）: " + Arrays.toString(projectionResults));
+    }
+
+    /**
+     * 安全点积
+     */
+
+    // 生成getdot_r方法
+    public BigInteger getDot_r() {
+        int k4 = 32;
+        SecureRandom random = new SecureRandom();
+        dot_r = new BigInteger(k4, random);
+        return dot_r;
+    }
+
+    public BigInteger[] calculateFirstRound(BigInteger[][] encryptedVectors, BigInteger p, BigInteger alpha) {
+        int k4 = 32;
+        SecureRandom random = new SecureRandom();
+        double[] b_ext = Arrays.copyOf(localModelParams, MODEL_SIZE + 2); // b扩展两位
+
+        BigInteger[] D_sums = new BigInteger[orthogonalVectorsForDo.length];
+
+        for (int vecIndex = 0; vecIndex < orthogonalVectorsForDo.length; vecIndex++) {
+            BigInteger[] D = new BigInteger[MODEL_SIZE + 2];
+            for (int i = 0; i < MODEL_SIZE + 2; i++) {
+                if (b_ext[i] != 0) {
+                    BigInteger value = BigInteger.valueOf((long) (b_ext[i] * 1000000)); // 放大精度
+                    D[i] = value.multiply(alpha).multiply(encryptedVectors[vecIndex][i]).mod(p);
+                } else {
+                    BigInteger r = new BigInteger(k4, random);
+                    D[i] = r.multiply(encryptedVectors[vecIndex][i]).mod(p);
+                }
+            }
+            BigInteger D_sum = BigInteger.ZERO;
+            for (int i = 0; i < MODEL_SIZE + 2; i++) {
+                D_sum = D_sum.add(D[i]);
+            }
+            D_sums[vecIndex] = D_sum.mod(p);
+        }
+
+        // for (int i = 0; i < orthogonalVectorsForDo.length; i++) {
+        // System.out.println("DO" + id + "点积第一轮加的随机数:" + dot_r);
+        // D_sums[i] = D_sums[i].mod(p);
+        // }
+
+        // System.out.println("DO " + id + " 计算第一轮结果: " + Arrays.toString(D_sums));
+        return D_sums;
+    }
+
+    // 计算第二轮结果
+    // 直接用自己训练后的全局模型参数点积自己的这一半正交向量组
+    public BigInteger[] calculateSecondRound(BigInteger p) {
+        BigInteger[] secondRoundResults = new BigInteger[orthogonalVectorsForDo.length];
+        BigInteger halfP = p.divide(BigInteger.valueOf(2));
+
+        for (int i = 0; i < orthogonalVectorsForDo.length; i++) {
+            // 存储每一项乘积的和
+            BigInteger dotProduct = BigInteger.ZERO;
+
+            // 计算点积
+            for (int j = 0; j < MODEL_SIZE; j++) {
+                // 转换为BigInteger并放大精度
+                BigInteger modelParam = BigInteger.valueOf((long) (localModelParams[j] * 1000000));
+                BigInteger vectorValue = BigInteger.valueOf((long) (orthogonalVectorsForDo[i][j] * 1000000));
+
+                // 处理负数 - 将负数转换为模p意义下的等价值
+                if (modelParam.signum() < 0) {
+                    modelParam = p.add(modelParam);
+                }
+                if (vectorValue.signum() < 0) {
+                    vectorValue = p.add(vectorValue);
+                }
+
+                // 计算乘积并累加
+                BigInteger product = modelParam.multiply(vectorValue);
+                dotProduct = dotProduct.add(product);
+            }
+
+            // 将结果调整到[-p/2, p/2]范围内
+            if (dotProduct.compareTo(halfP) > 0) {
+                dotProduct = dotProduct.subtract(p);
+            }
+
+            // 减去随机数
+            BigInteger result = dotProduct.mod(p);
+
+            if (result.compareTo(halfP) > 0) {
+                result = result.subtract(p);
+            }
+
+            secondRoundResults[i] = result;
+        }
+
+        return secondRoundResults;
+    }
+
+    public double[][] getOrthogonalVectorsForDO() {
+        return orthogonalVectorsForDo;
     }
 
     public double[] getProjectionResults() {

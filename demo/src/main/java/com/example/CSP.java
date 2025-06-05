@@ -17,14 +17,24 @@ class CSP {
     private int totalDO;
     private static final int MODEL_SIZE = 5;
     private static final double CLUSTER_DISTANCE_THRESHOLD = 0.3;
+
+    // 安全向量点积的参数
+    private final int k1 = 1024; // p的比特长度 建议128以上
+    private final int k2 = 64; // alpha的比特长度取 40-64之间
+    private final int k3 = 32; // c_i的比特长度
+    private final int k4 = 32; // r_i的比特长度
+    private final BigInteger csp_p;
+    private final BigInteger csp_alpha;
+    private final BigInteger csp_s;
+    private final BigInteger csp_sinv;
+
     public Map<Integer, BigInteger> receivedCiphertexts = new HashMap<>();
     public Map<Integer, BigInteger[]> receivedModelParams = new HashMap<>();
-    public Map<Integer, double[]> receivedProjections = new HashMap<>();
+    public Map<Integer, BigInteger[]> receivedProjections = new HashMap<>();
     public BigInteger aggregatedCiphertext;
     public BigInteger[] aggregatedModelParams;
     private double[][] orthogonalVectors;
     public double[][] orthogonalVectorsForCSP; // 存储分给CSP的向量组部分
-    private BigInteger[] currentModelParamHashes; // 添加字段存储当前轮次的模型参数哈希值
     private Map<Integer, BigInteger[]> firstRoundResults = new HashMap<>(); // 存储第一轮结果
     private Map<Integer, BigInteger[]> secondRoundResults = new HashMap<>(); // 存储第二轮结果
     private Map<Integer, BigInteger> recoveredNiValues = new HashMap<>(); // 存储恢复的n_i值
@@ -34,6 +44,13 @@ class CSP {
         this.totalDO = totalDO;
         this.orthogonalVectors = ta.getOrthogonalVectors();
         this.orthogonalVectorsForCSP = ta.getOrthogonalVectorsForCSP();
+
+        // 初始化安全向量点积的参数
+        SecureRandom random = new SecureRandom();
+        this.csp_p = BigInteger.probablePrime(k1, random);
+        this.csp_alpha = BigInteger.probablePrime(k2, random);
+        this.csp_s = new BigInteger(k1 - 2, random).add(BigInteger.ONE); // s ∈ Z_p
+        this.csp_sinv = this.csp_s.modInverse(this.csp_p);
     }
 
     // 写一个get方法获取orthogonalVectorsForCSP
@@ -63,8 +80,22 @@ class CSP {
     /**
      * 接收来自DO的投影结果
      */
-    public void receiveProjections(int doId, double[] projections) {
+    public void receiveProjections(int doId, BigInteger[] projections) {
         receivedProjections.put(doId, projections);
+    }
+
+    /**
+     * 计算模型参数的平均值
+     * 
+     * @param aggregatedParams 聚合后的参数
+     * @param activeCount      在线的DO数量
+     */
+    public double[] calculateAverage(double[] aggregatedParams, int activeCount) {
+        double[] averagedParams = new double[MODEL_SIZE];
+        for (int i = 0; i < MODEL_SIZE; i++) {
+            averagedParams[i] = aggregatedParams[i] / activeCount;
+        }
+        return averagedParams;
     }
 
     /**
@@ -151,52 +182,6 @@ class CSP {
     }
 
     /**
-     * 计算模型参数的平均值
-     * 
-     * @param aggregatedParams 聚合后的参数
-     * @param activeCount      在线的DO数量
-     */
-    public double[] calculateAverage(double[] aggregatedParams, int activeCount) {
-        double[] averagedParams = new double[MODEL_SIZE];
-        for (int i = 0; i < MODEL_SIZE; i++) {
-            averagedParams[i] = aggregatedParams[i] / activeCount;
-        }
-        return averagedParams;
-    }
-
-    /**
-     * 判断是否有 DO 掉线：即收到的密文数量是否少于 totalDO。
-     */
-    public boolean hasDropout() {
-        return receivedCiphertexts.size() < totalDO;
-    }
-
-    /**
-     * 如果检测到某个 DO 掉线，则向在线 DO 请求 TA 分发的该 DO 的私钥分片，
-     * 并利用拉格朗日插值恢复出掉线 DO 的私钥。
-     *
-     * availableDOs：在线的 DO 列表（不包含掉线 DO）。
-     */
-    // public BigInteger recoverMissingPrivateKey(int missingDOId, List<DO>
-    // availableDOs) {
-    // Map<Integer, BigInteger> shares = new HashMap<>();
-    // for (DO doObj : availableDOs) {
-    // int xValue = doObj.getId() + 1; // 确保 x 值唯一且与 DO ID 对应
-    // BigInteger share = doObj.uploadKeyShare(missingDOId);
-    // shares.put(xValue, share);
-    // }
-    // // 使用TA的门限值
-    // if (shares.size() < ta.getThreshold()) {
-    // throw new IllegalStateException("分片数量不足" + ta.getThreshold() + "个，无法恢复私钥");
-    // }
-    // BigInteger recoveredKey = Threshold.reconstructSecret(shares, ta.getN()); //
-    // 确保模数一致
-    // System.out.println("收集到 " + shares.size() + " 个分片");
-    // // System.out.println("恢复掉线 DO " + missingDOId + " 的私钥为: " + recoveredKey);
-    // return recoveredKey;
-    // }
-
-    /**
      * 恢复多个掉线 DO 的n_i值
      */
     public Map<Integer, BigInteger> recoverMissingPrivateKeys(List<Integer> missingDOIds, List<DO> availableDOs) {
@@ -226,7 +211,14 @@ class CSP {
     }
 
     /**
-     * 计算聚合参数与正交向量组的点积结果
+     * 判断是否有 DO 掉线：即收到的密文数量是否少于 totalDO。
+     */
+    public boolean hasDropout() {
+        return receivedCiphertexts.size() < totalDO;
+    }
+
+    /**
+     * 计算聚合参数与完整的正交向量组的点积结果
      * 
      * @param aggregatedParams 解密后的聚合参数
      * @return 点积结果数组
@@ -244,24 +236,43 @@ class CSP {
     }
 
     /**
-     * 基于点积结果比较和聚类分析进行投毒检测，接收解密得到的聚合后的模型参数值。
+     * 比较点积结果是否一致
+     * 
+     * @param aggregatedParams 解密后的聚合参数
+     * @param doIds            需要比较的DO ID列表，如果为null则比较所有DO
+     * @return 是否一致
      */
-    public List<Integer> detectPoisoning(double[] aggregatedParams) {
-        List<Integer> suspectedDOs = new ArrayList<>();
+    public boolean compareDotProducts(double[] aggregatedParams, List<Integer> doIds) {
+        //
 
-        // 1. 计算聚合参数与正交向量组的点积
+        // 1. 计算聚合参数与完整的正交向量组的点积
         double[] cspDotProducts = calculateDotProductsWithOrthogonalVectors(aggregatedParams);
+        System.out.println("\nCSP解密聚合数据---计算的点积结果: " + Arrays.toString(cspDotProducts));
 
         // 2. 获取DO上传的点积结果聚合
-        double[] doDotProducts = calculateAggregatedProjections();
+        double[] doDotProducts = new double[orthogonalVectors.length];
+        for (int i = 0; i < orthogonalVectors.length; i++) {
+            doDotProducts[i] = 0;
+            if (doIds == null) {
+                // 如果doIds为null，则处理所有DO
+                for (BigInteger[] projections : receivedProjections.values()) {
+                    doDotProducts[i] += projections[i].doubleValue() / 1e12;
+                }
+            } else {
+                // 只处理指定的DO
+                for (int doId : doIds) {
+                    if (receivedProjections.containsKey(doId)) {
+                        doDotProducts[i] += receivedProjections.get(doId)[i].doubleValue() / 1e12;
+                    }
+                }
+            }
+        }
+        System.out.println("\nCSP求和DO-------计算的点积结果: " + Arrays.toString(doDotProducts));
 
         // 3. 比较两个结果是否一致（考虑浮点数误差）
         double threshold = 1e-3;
-        System.out.println("\n第一轮聚合参数计算的点积结果: " + Arrays.toString(cspDotProducts));
-        System.out.println("第二轮DO上传的点积结果聚合: " + Arrays.toString(doDotProducts));
 
         // 计算相对误差
-        boolean consistent = true;
         for (int i = 0; i < cspDotProducts.length; i++) {
             double absoluteError = Math.abs(cspDotProducts[i] - doDotProducts[i]);
             double relativeError = 0;
@@ -275,22 +286,47 @@ class CSP {
             }
 
             if (relativeError > threshold) {
-                consistent = false;
-                System.out.printf("索引 %d 的相对误差: %.10f\n", i, relativeError);
-                break;
+                System.out.printf("索引 %d 的相对误差 %.10f 超过阈值 %.10f\n", i, relativeError, threshold);
+                return false;
             }
         }
+        return true;
+    }
 
-        // 4. 进行聚类分析
+    /**
+     * 比较所有DO的点积结果是否一致
+     * 
+     * @param aggregatedParams 解密后的聚合参数
+     * @return 是否一致
+     */
+    public boolean compareDotProducts(double[] aggregatedParams) {
+        return compareDotProducts(aggregatedParams, null);
+    }
+
+    /**
+     * 基于聚类分析进行投毒检测
+     */
+    public List<Integer> detectPoisoning(double[] aggregatedParams) {
+        List<Integer> suspectedDOs = new ArrayList<>();
+
+        // 1. 进行点积结果比较
+        boolean consistent = compareDotProducts(aggregatedParams);
+
+        // 2. 进行聚类分析
         Map<Integer, double[]> normalizedProjections = new HashMap<>();
         List<Integer> doIds = new ArrayList<>(receivedProjections.keySet());
         for (int doId : doIds) {
-            normalizedProjections.put(doId, normalizeVector(receivedProjections.get(doId)));
+            BigInteger[] projections = receivedProjections.get(doId);
+            double[] doubleProjections = new double[projections.length];
+            for (int i = 0; i < projections.length; i++) {
+                doubleProjections[i] = projections[i].doubleValue() / 1e12; // 将点积结果除以10^12
+            }
+            normalizedProjections.put(doId, normalizeVector(doubleProjections));
         }
         List<List<Integer>> clusters = clusterProjections(normalizedProjections, doIds);
         List<Integer> largestCluster = findLargestCluster(clusters);
 
-        // 5. 根据结果综合判断
+        // 3. 根据结果综合判断
         if (!consistent) {
             System.out.println("警告：检测到DO在两轮中使用了不同的参数！");
             for (int doId : doIds) {
@@ -307,7 +343,7 @@ class CSP {
             }
         }
 
-        // 6. 输出分析结果
+        // 4. 输出分析结果
         System.out.println("\n检测分析结果：");
         System.out.println("参数一致性检查: " + (consistent ? "通过" : "未通过"));
         System.out.println("聚类数量: " + clusters.size());
@@ -317,17 +353,6 @@ class CSP {
         }
 
         return suspectedDOs;
-    }
-
-    // 聚合来自DO的点积结果
-    private double[] calculateAggregatedProjections() {
-        double[] aggregatedProjections = new double[orthogonalVectors.length];
-        for (double[] projections : receivedProjections.values()) {
-            for (int i = 0; i < orthogonalVectors.length; i++) {
-                aggregatedProjections[i] += projections[i];
-            }
-        }
-        return aggregatedProjections;
     }
 
     private List<List<Integer>> clusterProjections(Map<Integer, double[]> normalizedProjections, List<Integer> doIds) {
@@ -411,7 +436,7 @@ class CSP {
     public void updateTA(TA newTA) {
         this.ta = newTA;
         this.orthogonalVectors = newTA.getOrthogonalVectors();
-
+        this.orthogonalVectorsForCSP = newTA.getOrthogonalVectorsForCSP();
         System.out.println("CSP 更新了TA的全局参数和正交向量");
     }
 
@@ -445,19 +470,29 @@ class CSP {
         List<Integer> firstHalf = doIds.subList(0, mid);
         List<Integer> secondHalf = doIds.subList(mid, doIds.size());
 
-        System.out.println("检查前半部分DO: " + firstHalf);
-        System.out.println("检查后半部分DO: " + secondHalf);
+        System.out.println("\n=== 二分查找调试信息 ===");
+        System.out.println("当前检查的DO列表: " + doIds);
+        System.out.println("前半部分DO: " + firstHalf);
+        System.out.println("后半部分DO: " + secondHalf);
+        System.out.println("当前CSP存储的模型参数数量: " + receivedModelParams.size());
+        System.out.println("当前CSP存储的投影结果数量: " + receivedProjections.size());
+        System.out.println("正交向量组维度: " + orthogonalVectors.length + "x" + orthogonalVectors[0].length);
 
         // 计算前半部分DO的聚合值
         BigInteger[] firstHalfAggregated = aggregatePartialDOs(firstHalf, ta);
         double[] firstHalfDecrypted = decryptPartialAggregation(firstHalfAggregated, firstHalf, ta);
+        System.out.println("前半部分DO解密后的参数: " + Arrays.toString(firstHalfDecrypted));
 
         // 计算后半部分DO的聚合值
         BigInteger[] secondHalfAggregated = aggregatePartialDOs(secondHalf, ta);
         double[] secondHalfDecrypted = decryptPartialAggregation(secondHalfAggregated, secondHalf, ta);
+        System.out.println("后半部分DO解密后的参数: " + Arrays.toString(secondHalfDecrypted));
 
         // 检查哪一部分的聚合值不一致
-        if (isAggregationConsistent(firstHalfDecrypted, firstHalf)) {
+        boolean firstHalfConsistent = compareDotProducts(firstHalfDecrypted, firstHalf);
+        System.out.println("前半部分DO的聚合值一致性: " + firstHalfConsistent);
+
+        if (firstHalfConsistent) {
             System.out.println("前半部分DO的聚合值一致，恶意DO在后半部分");
             return findMaliciousDO(secondHalf, ta);
         } else {
@@ -539,58 +574,6 @@ class CSP {
     }
 
     /**
-     * 检查聚合值是否一致
-     */
-    private boolean isAggregationConsistent(double[] params, List<Integer> doIds) {
-        // 1. 使用参数与正交向量组计算点积
-        double[] cspDotProducts = new double[orthogonalVectors.length];
-        for (int i = 0; i < orthogonalVectors.length; i++) {
-            double dotProduct = 0;
-            for (int j = 0; j < MODEL_SIZE; j++) {
-                dotProduct += orthogonalVectors[i][j] * params[j];
-            }
-            cspDotProducts[i] = dotProduct;
-        }
-
-        // 2. 计算选定DO的投影结果聚合
-        double[] doDotProducts = new double[orthogonalVectors.length];
-        for (int i = 0; i < orthogonalVectors.length; i++) {
-            doDotProducts[i] = 0;
-            // 只计算当前检查的DO的投影结果
-            for (int doId : doIds) {
-                if (receivedProjections.containsKey(doId)) {
-                    doDotProducts[i] += receivedProjections.get(doId)[i];
-                }
-            }
-        }
-
-        // 3. 比较两个结果是否一致（考虑浮点数误差）
-        double threshold = 1e-3;
-        System.out.println("\n当前部分DO聚合参数计算的点积结果: " + Arrays.toString(cspDotProducts));
-        System.out.println("当前部分DO上传的点积结果聚合: " + Arrays.toString(doDotProducts));
-
-        // 计算相对误差
-        for (int i = 0; i < cspDotProducts.length; i++) {
-            double absoluteError = Math.abs(cspDotProducts[i] - doDotProducts[i]);
-            double relativeError = 0;
-
-            if (Math.abs(cspDotProducts[i]) > 1e-10) {
-                relativeError = absoluteError / Math.abs(cspDotProducts[i]);
-            } else if (Math.abs(doDotProducts[i]) > 1e-10) {
-                relativeError = absoluteError / Math.abs(doDotProducts[i]);
-            } else {
-                relativeError = absoluteError;
-            }
-
-            if (relativeError > threshold) {
-                System.out.printf("索引 %d 的相对误差: %.10f\n", i, relativeError);
-                return false;
-            }
-        }
-        return true;
-    }
-
-    /**
      * 检测掉线的DO
      * 
      * @param doList DO列表
@@ -610,22 +593,12 @@ class CSP {
      * 安全向量点积
      */
 
-    int k1 = 1024; // p的比特长度 建议128以上
-    int k2 = 64; // alpha的比特长度取 40-64之间
-    int k3 = 32; // c_i的比特长度
-    int k4 = 32; // r_i的比特长度
-    SecureRandom random = new SecureRandom();
-    BigInteger csp_p = BigInteger.probablePrime(k1, random);
-    BigInteger csp_alpha = BigInteger.probablePrime(k2, random);
-    BigInteger csp_s = new BigInteger(k1 - 2, random).add(BigInteger.ONE); // s ∈ Z_p
-    BigInteger csp_sinv = csp_s.modInverse(csp_p);
-
     // 加密CSP的一半正交向量组
     public BigInteger[][] encryptCspVectors() {
         int csp_n = orthogonalVectorsForCSP[0].length; // 维度
         BigInteger[][] C = new BigInteger[orthogonalVectorsForCSP.length][csp_n + 2];
         BigInteger[][] c = new BigInteger[orthogonalVectorsForCSP.length][csp_n + 2];
-
+        SecureRandom random = new SecureRandom();
         for (int vecIndex = 0; vecIndex < orthogonalVectorsForCSP.length; vecIndex++) {
             double[] a_ext = Arrays.copyOf(orthogonalVectorsForCSP[vecIndex], csp_n + 2); // 每个向量扩展两位
             for (int i = 0; i < csp_n + 2; i++) {
@@ -690,6 +663,7 @@ class CSP {
 
             // 处理负数情况
             if (E.compareTo(halfP) > 0) {
+                System.out.println("第一轮结果溢出，进行修正.....");
                 E = E.subtract(p);
             }
 

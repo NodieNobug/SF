@@ -81,7 +81,6 @@ public class All_Test {
                     continue;
 
                 doObj.updateGlobalModelParams(globalModelParams); // 接收全局模型参数
-                System.out.println("DO " + doObj.getId() + " 更新后的全局模型参数: " + Arrays.toString(globalModelParams));
 
                 doObj.trainModel(); // 本地训练
 
@@ -124,8 +123,26 @@ public class All_Test {
                     }
                 }
 
-                doObj.calculateProjections(); // 计算投影结果
-                csp.receiveProjections(doObj.getId(), doObj.getProjectionResults()); // 获取投影结果
+                // 使用新的安全向量点积算法
+                // 1. CSP加密自己的正交向量组
+                BigInteger[][] encryptedCspVectors = csp.encryptCspVectors();
+                BigInteger cspP = csp.getCspP();
+                BigInteger cspAlpha = csp.getCspAlpha();
+
+                // 2. DO计算第一轮结果
+                BigInteger[] firstRoundResult = doObj.calculateFirstRound(encryptedCspVectors, cspP, cspAlpha);
+                csp.receiveFirstRoundResult(doObj.getId(), firstRoundResult);
+
+                // 3. DO计算第二轮结果
+                BigInteger[] secondRoundResult = doObj.calculateSecondRound(cspP);
+                csp.receiveSecondRoundResult(doObj.getId(), secondRoundResult);
+
+                // 4. CSP计算最终点积结果
+                BigInteger[] finalDotProduct = csp.calculateFinalDotProduct(doObj.getId(), cspP);
+                System.out.println("DO " + doObj.getId() + " 的最终点积结果: " + Arrays.toString(finalDotProduct));
+
+                // 保存最终点积结果用于后续比较
+                csp.receiveProjections(doObj.getId(), finalDotProduct);
             }
 
             // 4. CSP聚合模型参数并解密
@@ -172,7 +189,6 @@ public class All_Test {
                             .multiply(maliciousDOParams[i].modInverse(ta.getN().multiply(ta.getN())))
                             .mod(ta.getN().multiply(ta.getN()));
                 }
-
             }
 
             // 7. 计算全局模型参数并分发给DO
@@ -207,86 +223,15 @@ public class All_Test {
             }
 
             System.out.println("CSP 分发的全局模型参数: " + Arrays.toString(globalModelParams));
-            // 记录当前轮次的模型参数
 
-            // 7. 清理CSP状态
+            // 7. 清理CSP状态（移到二分查找之后）
             csp.clearState();
+
         }
 
         endTime = System.currentTimeMillis();
         System.out.println("程序运行时间：" + (endTime - startTime) + "ms");
     }
-
-    /**
-     * 使用全局模型参数生成模型参数哈希值
-     */
-
-    /**
-     * 可视化每个DO的损失曲线
-     */
-    // private static void visualizeLossHistory(Map<Integer, List<Double>>
-    // doLossHistory, int numRounds) {
-    // // 设置中文主题
-    // StandardChartTheme chartTheme = new StandardChartTheme("CN");
-    // // 设置图表标题字体
-    // chartTheme.setExtraLargeFont(new Font("黑体", Font.BOLD, 20));
-    // // 设置轴标签字体
-    // chartTheme.setLargeFont(new Font("黑体", Font.BOLD, 16));
-    // // 设置图例字体
-    // chartTheme.setRegularFont(new Font("宋体", Font.PLAIN, 12));
-    // // 应用主题
-    // ChartFactory.setChartTheme(chartTheme);
-
-    // XYSeriesCollection dataset = new XYSeriesCollection();
-
-    // // 为每个DO创建一个数据系列
-    // for (Map.Entry<Integer, List<Double>> entry : doLossHistory.entrySet()) {
-    // XYSeries series = new XYSeries("DO " + entry.getKey());
-    // List<Double> losses = entry.getValue();
-    // for (int round = 0; round < losses.size(); round++) {
-    // series.add(round + 1, losses.get(round));
-    // }
-    // dataset.addSeries(series);
-    // }
-
-    // // 创建图表
-    // JFreeChart chart = ChartFactory.createXYLineChart(
-    // "联邦学习训练损失曲线",
-    // "训练轮次",
-    // "训练损失值",
-    // dataset,
-    // PlotOrientation.VERTICAL,
-    // true,
-    // true,
-    // false);
-
-    // // 自定义图表外观
-    // XYPlot plot = chart.getXYPlot();
-    // XYLineAndShapeRenderer renderer = new XYLineAndShapeRenderer();
-
-    // // 为每个DO设置不同的颜色
-    // for (int i = 0; i < dataset.getSeriesCount(); i++) {
-    // renderer.setSeriesPaint(i, COLORS[i % COLORS.length]);
-    // renderer.setSeriesStroke(i, new BasicStroke(2.0f));
-    // }
-
-    // plot.setRenderer(renderer);
-    // plot.setBackgroundPaint(Color.WHITE);
-    // plot.setRangeGridlinesVisible(true);
-    // plot.setRangeGridlinePaint(Color.LIGHT_GRAY);
-    // plot.setDomainGridlinesVisible(true);
-    // plot.setDomainGridlinePaint(Color.LIGHT_GRAY);
-
-    // // 显示图表
-    // JFrame frame = new JFrame("损失曲线");
-    // frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-    // ChartPanel chartPanel = new ChartPanel(chart);
-    // chartPanel.setPreferredSize(new java.awt.Dimension(800, 600));
-    // frame.setContentPane(chartPanel);
-    // frame.pack();
-    // frame.setLocationRelativeTo(null);
-    // frame.setVisible(true);
-    // }
 
     /**
      * 检查聚合值是否一致

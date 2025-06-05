@@ -36,7 +36,6 @@ class DO {
         this.id = id;
         this.ta = ta;
         this.basePrivatekey = ta.getBaseKey(id); // 获取自己的私钥
-        this.orthogonalVectors = ta.getOrthogonalVectors(); // 获取正交向量组
         this.orthogonalVectorsForDo = ta.getOrthogonalVectorsForDO(); // 获取分给DO的向量组部分
 
         // 存储分给本DO的所有其他DO的私钥分片
@@ -49,9 +48,30 @@ class DO {
         }
         this.localModelParams = new double[MODEL_SIZE];
         this.encryptedModelParams = new BigInteger[MODEL_SIZE];
-        this.projectionResults = new double[orthogonalVectors.length];
+        this.projectionResults = new double[orthogonalVectorsForDo.length];
 
         loadAndProcessData(); // 在构造函数中加载数据
+    }
+
+    /**
+     * 更新TA参数
+     */
+    public void updateTA(TA ta) {
+        this.ta = ta;
+        // this.myPrivateKey = ta.getBaseKey(id); // 更新自己的私钥
+        this.orthogonalVectorsForDo = ta.getOrthogonalVectorsForDO(); // 更新正交向量组
+
+        // // 清空并重新存储分片
+        receivedKeyShares.clear();
+        for (Map.Entry<Integer, Map<Integer, BigInteger>> entry : ta.doKeyShares.entrySet()) {
+            int sourceDOId = entry.getKey();
+            Map<Integer, BigInteger> shares = entry.getValue();
+            if (shares.containsKey(this.id)) {
+                receivedKeyShares.put(sourceDOId, shares.get(this.id));
+            }
+        }
+
+        System.out.println("DO " + id + " 更新了TA参数和私钥分片");
     }
 
     /**
@@ -249,7 +269,9 @@ class DO {
         }
     }
 
-    // 写一个更新密钥的方法updatekey
+    /**
+     * 更新密钥 - 计算当前模型参数的哈希值，并更新私钥。
+     */
     public void updateKey() {
         try {
             // 计算当前模型参数的哈希值
@@ -281,32 +303,33 @@ class DO {
     }
 
     /**
-     * 计算点积结果
+     * 计算点积结果,暂时废弃
      */
-    public void calculateProjections() {
-        projectionResults = new double[orthogonalVectors.length]; // 修改为正确长度5
-        // 计算模型参数与每个正交向量的点积
-        for (int i = 0; i < orthogonalVectors.length; i++) {
-            double dotProduct = 0;
-            for (int j = 0; j < MODEL_SIZE; j++) {
-                dotProduct += orthogonalVectors[i][j] * localModelParams[j];
-            }
-            projectionResults[i] = dotProduct;
-        }
-        System.out.println("DO " + id + " 的点积结果（模型参数在各正交向量上的投影）: " + Arrays.toString(projectionResults));
-    }
+    // public void calculateProjections() {
+    // projectionResults = new double[orthogonalVectors.length]; // 修改为正确长度5
+    // // 计算模型参数与每个正交向量的点积
+    // for (int i = 0; i < orthogonalVectors.length; i++) {
+    // double dotProduct = 0;
+    // for (int j = 0; j < MODEL_SIZE; j++) {
+    // dotProduct += orthogonalVectors[i][j] * localModelParams[j];
+    // }
+    // projectionResults[i] = dotProduct;
+    // }
+    // System.out.println("DO " + id + " 的点积结果（模型参数在各正交向量上的投影）: " +
+    // Arrays.toString(projectionResults));
+    // }
 
     /**
      * 安全点积
      */
 
     // 生成getdot_r方法
-    public BigInteger getDot_r() {
-        int k4 = 32;
-        SecureRandom random = new SecureRandom();
-        dot_r = new BigInteger(k4, random);
-        return dot_r;
-    }
+    // public BigInteger getDot_r() {
+    // int k4 = 32;
+    // SecureRandom random = new SecureRandom();
+    // dot_r = new BigInteger(k4, random);
+    // return dot_r;
+    // }
 
     public BigInteger[] calculateFirstRound(BigInteger[][] encryptedVectors, BigInteger p, BigInteger alpha) {
         int k4 = 32;
@@ -346,7 +369,7 @@ class DO {
     // 直接用自己训练后的全局模型参数点积自己的这一半正交向量组
     public BigInteger[] calculateSecondRound(BigInteger p) {
         BigInteger[] secondRoundResults = new BigInteger[orthogonalVectorsForDo.length];
-        BigInteger halfP = p.divide(BigInteger.valueOf(2));
+        // BigInteger halfP = p.divide(BigInteger.valueOf(2));
 
         for (int i = 0; i < orthogonalVectorsForDo.length; i++) {
             // 存储每一项乘积的和
@@ -354,17 +377,19 @@ class DO {
 
             // 计算点积
             for (int j = 0; j < MODEL_SIZE; j++) {
+                // System.out.println("当前DO的model参数: " + localModelParams[j]);
+                // System.out.println("当前DO的正交向量组: " + orthogonalVectorsForDo[i][j]);
                 // 转换为BigInteger并放大精度
                 BigInteger modelParam = BigInteger.valueOf((long) (localModelParams[j] * 1000000));
                 BigInteger vectorValue = BigInteger.valueOf((long) (orthogonalVectorsForDo[i][j] * 1000000));
 
                 // 处理负数 - 将负数转换为模p意义下的等价值
-                if (modelParam.signum() < 0) {
-                    modelParam = p.add(modelParam);
-                }
-                if (vectorValue.signum() < 0) {
-                    vectorValue = p.add(vectorValue);
-                }
+                // if (modelParam.signum() < 0) {
+                // modelParam = p.add(modelParam);
+                // }
+                // if (vectorValue.signum() < 0) {
+                // vectorValue = p.add(vectorValue);
+                // }
 
                 // 计算乘积并累加
                 BigInteger product = modelParam.multiply(vectorValue);
@@ -372,16 +397,16 @@ class DO {
             }
 
             // 将结果调整到[-p/2, p/2]范围内
-            if (dotProduct.compareTo(halfP) > 0) {
-                dotProduct = dotProduct.subtract(p);
-            }
+            // if (dotProduct.compareTo(halfP) > 0) {
+            // dotProduct = dotProduct.subtract(p);
+            // }
 
             // 减去随机数
             BigInteger result = dotProduct.mod(p);
 
-            if (result.compareTo(halfP) > 0) {
-                result = result.subtract(p);
-            }
+            // if (result.compareTo(halfP) > 0) {
+            // result = result.subtract(p);
+            // }
 
             secondRoundResults[i] = result;
         }
@@ -414,24 +439,4 @@ class DO {
         this.localModelParams = Arrays.copyOf(globalModelParams, globalModelParams.length); // 初始化模型参数
     }
 
-    /**
-     * 更新TA参数
-     */
-    public void updateTA(TA ta) {
-        this.ta = ta;
-        this.myPrivateKey = ta.getBaseKey(id); // 更新自己的私钥
-        this.orthogonalVectors = ta.getOrthogonalVectors(); // 更新正交向量组
-
-        // 清空并重新存储分片
-        receivedKeyShares.clear();
-        for (Map.Entry<Integer, Map<Integer, BigInteger>> entry : ta.doKeyShares.entrySet()) {
-            int sourceDOId = entry.getKey();
-            Map<Integer, BigInteger> shares = entry.getValue();
-            if (shares.containsKey(this.id)) {
-                receivedKeyShares.put(sourceDOId, shares.get(this.id));
-            }
-        }
-
-        System.out.println("DO " + id + " 更新了TA参数和私钥分片");
-    }
 }

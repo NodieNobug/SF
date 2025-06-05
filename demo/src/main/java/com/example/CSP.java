@@ -27,6 +27,7 @@ class CSP {
     private BigInteger[] currentModelParamHashes; // 添加字段存储当前轮次的模型参数哈希值
     private Map<Integer, BigInteger[]> firstRoundResults = new HashMap<>(); // 存储第一轮结果
     private Map<Integer, BigInteger[]> secondRoundResults = new HashMap<>(); // 存储第二轮结果
+    private Map<Integer, BigInteger> recoveredNiValues = new HashMap<>(); // 存储恢复的n_i值
 
     public CSP(TA ta, int totalDO) {
         this.ta = ta;
@@ -83,29 +84,60 @@ class CSP {
     }
 
     /**
-     * 解密聚合后的数据。这里采用 ImprovedPaillier 中的解密思路：
-     * L = (aggregated^(lambda) mod N^2 - 1) / N，然后乘以 u，再 mod y 得到结果。
-     * allPrivateKeys 为所有 DO 的私钥列表（包括恢复后的掉线 DO 私钥）。
-     * 注意：示例中为简化实现，未对各私钥进行联合分布式解密。
-     */
-    public BigInteger decrypt(BigInteger aggregated, BigInteger lambda, BigInteger N, BigInteger u, BigInteger y) {
-        BigInteger L = aggregated.modPow(lambda, N.multiply(N)).subtract(BigInteger.ONE).divide(N);
-        return L.multiply(u).mod(N).mod(y);
-    }
-
-    /**
-     * 解密聚合后的模型参数，并处理大数溢出问题
+     * 正常情况下的解密方法
      */
     public double[] decrypt(BigInteger[] aggregated, BigInteger lambda, BigInteger N,
             BigInteger u, BigInteger y) {
         double[] decryptedParams = new double[MODEL_SIZE];
+        BigInteger N2 = N.multiply(N);
+
         for (int i = 0; i < MODEL_SIZE; i++) {
-            BigInteger L = aggregated[i].modPow(lambda, N.multiply(N))
+            BigInteger L = aggregated[i].modPow(lambda, N2)
                     .subtract(BigInteger.ONE).divide(N);
 
             BigInteger decrypted = L.multiply(u).mod(N).mod(y);
-            // System.out.println("解密后的结果" + decrypted);
-            // System.out.println("y值是" + y);
+
+            // 在BigInteger阶段处理负数情况
+            if (decrypted.compareTo(y.divide(BigInteger.TWO)) > 0) {
+                System.out.println("" + i + " 号参数溢出，进行修正.....");
+                decrypted = decrypted.subtract(y);
+            }
+
+            // 将处理后的BigInteger转换为double（除以10^6恢复精度）
+            decryptedParams[i] = decrypted.doubleValue() / 1000000.0;
+        }
+        return decryptedParams;
+    }
+
+    /**
+     * DO掉线情况下的解密方法
+     */
+    public double[] decryptWithRecovery(BigInteger[] aggregated, BigInteger lambda, BigInteger N,
+            BigInteger u, BigInteger y) {
+        double[] decryptedParams = new double[MODEL_SIZE];
+        BigInteger N2 = N.multiply(N);
+
+        // 计算所有恢复的n_i值的和
+        BigInteger sumNi = BigInteger.ZERO;
+        for (BigInteger ni : recoveredNiValues.values()) {
+            sumNi = sumNi.add(ni);
+        }
+
+        // 计算R_t^sumNi
+        BigInteger R_t = ta.getR_t();
+        BigInteger R_t_pow_sumNi = R_t.modPow(sumNi, N2);
+
+        for (int i = 0; i < MODEL_SIZE; i++) {
+            // 在密文上乘以R_t^sumNi
+            BigInteger modifiedCiphertext = aggregated[i].multiply(R_t_pow_sumNi).mod(N2);
+            System.out.println("\n在密文上乘以R_t^sumNi后的密文: " + modifiedCiphertext);
+
+            BigInteger L = modifiedCiphertext.modPow(lambda, N2)
+                    .subtract(BigInteger.ONE).divide(N);
+
+            BigInteger decrypted = L.multiply(u).mod(N).mod(y);
+            System.out.println("\n有DO掉线时解密的结果： " + decrypted);
+
             // 在BigInteger阶段处理负数情况
             if (decrypted.compareTo(y.divide(BigInteger.TWO)) > 0) {
                 System.out.println("" + i + " 号参数溢出，进行修正.....");
@@ -145,45 +177,34 @@ class CSP {
      *
      * availableDOs：在线的 DO 列表（不包含掉线 DO）。
      */
-    public BigInteger recoverMissingPrivateKey(int missingDOId, List<DO> availableDOs) {
-        Map<Integer, BigInteger> shares = new HashMap<>();
-        for (DO doObj : availableDOs) {
-            int xValue = doObj.getId() + 1; // 确保 x 值唯一且与 DO ID 对应
-            BigInteger share = doObj.uploadKeyShare(missingDOId);
-            shares.put(xValue, share);
-        }
-        // 使用TA的门限值
-        if (shares.size() < ta.getThreshold()) {
-            throw new IllegalStateException("分片数量不足" + ta.getThreshold() + "个，无法恢复私钥");
-        }
-        BigInteger recoveredKey = Threshold.reconstructSecret(shares, ta.getN()); // 确保模数一致
-        System.out.println("收集到 " + shares.size() + " 个分片");
-        // System.out.println("恢复掉线 DO " + missingDOId + " 的私钥为: " + recoveredKey);
-        return recoveredKey;
-    }
+    // public BigInteger recoverMissingPrivateKey(int missingDOId, List<DO>
+    // availableDOs) {
+    // Map<Integer, BigInteger> shares = new HashMap<>();
+    // for (DO doObj : availableDOs) {
+    // int xValue = doObj.getId() + 1; // 确保 x 值唯一且与 DO ID 对应
+    // BigInteger share = doObj.uploadKeyShare(missingDOId);
+    // shares.put(xValue, share);
+    // }
+    // // 使用TA的门限值
+    // if (shares.size() < ta.getThreshold()) {
+    // throw new IllegalStateException("分片数量不足" + ta.getThreshold() + "个，无法恢复私钥");
+    // }
+    // BigInteger recoveredKey = Threshold.reconstructSecret(shares, ta.getN()); //
+    // 确保模数一致
+    // System.out.println("收集到 " + shares.size() + " 个分片");
+    // // System.out.println("恢复掉线 DO " + missingDOId + " 的私钥为: " + recoveredKey);
+    // return recoveredKey;
+    // }
 
     /**
-     * 使用恢复的私钥对全 0 虚构数据进行加密
-     */
-    public BigInteger encryptZeroData(BigInteger recoveredKey, BigInteger N, BigInteger g, BigInteger h) {
-        SecureRandom random = new SecureRandom();
-        BigInteger r = new BigInteger(N.bitLength() / 2, random);
-        BigInteger zeroData = BigInteger.ZERO;
-        return g.modPow(zeroData, N.multiply(N))
-                .multiply(h.modPow(r, N.multiply(N)))
-                .multiply(recoveredKey)
-                .mod(N.multiply(N));
-    }
-
-    /**
-     * 恢复多个掉线 DO 的私钥
+     * 恢复多个掉线 DO 的n_i值
      */
     public Map<Integer, BigInteger> recoverMissingPrivateKeys(List<Integer> missingDOIds, List<DO> availableDOs) {
-        Map<Integer, BigInteger> recoveredKeys = new HashMap<>();
-        BigInteger modulus = ta.getN().multiply(ta.getN()); // 修改：使用N^2作为模数
+        recoveredNiValues.clear(); // 清空之前的值
+        BigInteger modulus = ta.getN(); // 使用N作为模数，因为n_i是在模N下的值
 
         for (int missingDOId : missingDOIds) {
-            System.out.println("\n开始恢复 DO " + missingDOId + " 的私钥\n");
+            System.out.println("\n开始恢复 DO " + missingDOId + " 的n_i值\n");
             Map<Integer, BigInteger> shares = new HashMap<>();
 
             for (DO doObj : availableDOs) {
@@ -198,15 +219,10 @@ class CSP {
                 throw new IllegalStateException("分片数量不足" + ta.getThreshold() + "个，当前只有: " + shares.size() + "个");
             }
 
-            BigInteger recoveredKey = Threshold.reconstructSecret(shares, modulus); // 使用N^2作为模数
-            // System.out.println("原始私钥: " + ta.doPrivateKeys.get(missingDOId));
-            // System.out.println("恢复的私钥: " + recoveredKey);
-            // System.out.println("私钥恢复正确性验证: " +
-            // recoveredKey.equals(ta.doPrivateKeys.get(missingDOId)));
-
-            recoveredKeys.put(missingDOId, recoveredKey);
+            BigInteger recoveredNi = Threshold.reconstructSecret(shares, modulus); // 使用N作为模数
+            recoveredNiValues.put(missingDOId, recoveredNi);
         }
-        return recoveredKeys;
+        return recoveredNiValues;
     }
 
     /**
@@ -395,7 +411,7 @@ class CSP {
     public void updateTA(TA newTA) {
         this.ta = newTA;
         this.orthogonalVectors = newTA.getOrthogonalVectors();
-        this.currentModelParamHashes = newTA.getModelParamHashes(); // 更新当前轮次的模型参数哈希值
+
         System.out.println("CSP 更新了TA的全局参数和正交向量");
     }
 
@@ -407,8 +423,8 @@ class CSP {
         receivedProjections.clear();
         firstRoundResults.clear(); // 清理第一轮结果
         secondRoundResults.clear(); // 清理第二轮结果
+        recoveredNiValues.clear(); // 清理恢复的n_i值
         System.out.println("CSP 状态已清理，准备进入下一轮联邦学习");
-
     }
 
     /**
@@ -456,9 +472,7 @@ class CSP {
     private BigInteger[] aggregatePartialDOs(List<Integer> doIds, TA ta) {
         BigInteger N = ta.getN();
         BigInteger N2 = N.multiply(N);
-        BigInteger g = ta.getG();
-        BigInteger h = ta.getH();
-        BigInteger R_t = ta.getR_t(); // 使用当前轮次的R_t
+        BigInteger R_t = ta.getR_t();
         BigInteger[] aggregated = new BigInteger[MODEL_SIZE];
         Arrays.fill(aggregated, BigInteger.ONE);
 
@@ -468,41 +482,22 @@ class CSP {
             BigInteger n_i = ta.getNi(doId);
             sumNi = sumNi.add(n_i);
         }
-        // 用N减去当前要计算的DO的n_i值的和
-        sumNi = N.subtract(sumNi);
+        sumNi = N.subtract(sumNi); // 计算N - sumNi
 
-        SecureRandom random = new SecureRandom();
-        BigInteger r = new BigInteger(N.bitLength() / 2, random);
+        // 计算R_t^sumNi
+        BigInteger R_t_pow_sumNi = R_t.modPow(sumNi, N2);
 
-        // 使用当前轮次的R_t构建0密文
-        BigInteger zeroCiphertext = g.modPow(BigInteger.ZERO, N2)
-                .multiply(h.modPow(r, N2));
-
-        // 计算当前要计算的DO的n_i * modelParamHashes之和
-        BigInteger sumNiHashes = BigInteger.ZERO;
-        BigInteger commonModelParamHash = currentModelParamHashes[0]; // 使用第一个DO的哈希值作为共同值
-        for (int doId : doIds) {
-            BigInteger n_i = ta.getNi(doId);
-            // 使用共同的模型参数哈希值
-            sumNiHashes = sumNiHashes.add(n_i.multiply(commonModelParamHash));
-        }
-        // 用N减去当前要计算的DO的n_i * modelParamHashes值的和
-        sumNiHashes = N.multiply(commonModelParamHash).subtract(sumNiHashes);
-
-        // 将R_t的幂次计算加入zeroCiphertext
-        zeroCiphertext = zeroCiphertext.multiply(R_t.modPow(sumNiHashes, N2)).mod(N2);
-
-        // 将0密文作为初始值
-        for (int i = 0; i < MODEL_SIZE; i++) {
-            aggregated[i] = zeroCiphertext;
-        }
-
-        // 然后聚合目标DO的加密参数
+        // 聚合目标DO的加密参数
         for (int doId : doIds) {
             BigInteger[] encryptedParams = receivedModelParams.get(doId);
             for (int i = 0; i < MODEL_SIZE; i++) {
                 aggregated[i] = aggregated[i].multiply(encryptedParams[i]).mod(N2);
             }
+        }
+
+        // 在密文上乘以R_t^sumNi
+        for (int i = 0; i < MODEL_SIZE; i++) {
+            aggregated[i] = aggregated[i].multiply(R_t_pow_sumNi).mod(N2);
         }
 
         return aggregated;
@@ -692,10 +687,14 @@ class CSP {
         for (int vecIndex = 0; vecIndex < orthogonalVectorsForCSP.length; vecIndex++) {
             // 解密第一轮结果
             BigInteger E = csp_sinv.multiply(firstRound[vecIndex]).mod(p);
+
+            // 处理负数情况
+            if (E.compareTo(halfP) > 0) {
+                E = E.subtract(p);
+            }
+
+            // 计算内积结果
             BigInteger inner = E.subtract(E.mod(alpha2)).divide(alpha2);
-
-            // BigInteger inner = E.divide(alpha2).mod(p); // 确保结果在[-p/2, p/2]范围内
-
             defirstRound[vecIndex] = inner;
             System.out.println("CSP 第一轮结果解密: " + defirstRound[vecIndex]);
         }

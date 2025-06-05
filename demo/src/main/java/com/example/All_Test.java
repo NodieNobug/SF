@@ -28,11 +28,7 @@ public class All_Test {
     // 添加常量定义
     private static final int MODEL_PARAM_LENGTH = 5; // 模型参数维度
     private static final int numDO = 7; // 可以设置更大的DO数量
-    private static final int numRounds = 9;// 联邦学习轮次
-    private static final Color[] COLORS = {
-            Color.RED, Color.BLUE, Color.GREEN, Color.ORANGE,
-            Color.MAGENTA
-    };
+    private static final int numRounds = 7;// 联邦学习轮次
 
     // 记录时间
     public static void main(String[] args) {
@@ -45,21 +41,12 @@ public class All_Test {
         double[] globalModelParams = new double[modelParamLength];
         Arrays.fill(globalModelParams, 0.0);
 
-        // 用于记录每一轮的模型参数值
-        List<double[]> globalModelHistory = new ArrayList<>();
-
-        // 用于存储每个DO在每轮的损失值
-        Map<Integer, List<Double>> doLossHistory = new HashMap<>();
-        for (int i = 0; i < numDO; i++) {
-            doLossHistory.put(i, new ArrayList<>());
-        }
-
         for (int round = 1; round <= numRounds; round++) {
             System.out.println("\n===== 联邦学习第 " + round + " 轮 =====");
 
             // 1. TA生成全局参数和正交矩阵
-            BigInteger[] modelParamHashes = generateModelParamHashes(globalModelParams);
-            TA ta = new TA(numDO, modelParamHashes);
+
+            TA ta = new TA(numDO);
 
             // 2. 初始化DO和CSP（第一轮）或更新TA参数（后续轮次）
             if (round == 1) {
@@ -97,8 +84,6 @@ public class All_Test {
                 System.out.println("DO " + doObj.getId() + " 更新后的全局模型参数: " + Arrays.toString(globalModelParams));
 
                 doObj.trainModel(); // 本地训练
-                // 记录损失值
-                doLossHistory.get(doObj.getId()).add(doObj.getLastAverageLoss());
 
                 // 第四轮和第七轮：模拟一致性投毒（在训练后投毒）
                 if ((round == 4 || round == 7) && doObj.getId() == 3) {
@@ -122,7 +107,7 @@ public class All_Test {
                 csp.receiveData(doObj.getId(), doObj.getEncryptedModelParams()); // 获取加密模型参数
 
                 // 第七轮：DO 3在计算点积时使用精心构建的参数
-                if (round == 7 && doObj.getId() == 3) {
+                if (round == 7 && doObj.getId() == 2) {
                     try {
                         java.lang.reflect.Field field = DO.class.getDeclaredField("localModelParams");
                         field.setAccessible(true);
@@ -203,26 +188,16 @@ public class All_Test {
                     }
                 }
 
-                // 恢复掉线DO的私钥
-                Map<Integer, BigInteger> recoveredKeys = csp.recoverMissingPrivateKeys(droppedDOs, availableDOs);
+                // 恢复掉线DO的n_i值
+                Map<Integer, BigInteger> recoveredNiValues = csp.recoverMissingPrivateKeys(droppedDOs, availableDOs);
                 for (int droppedDO : droppedDOs) {
-                    System.out.println("恢复的 DO " + droppedDO + " 私钥: " + recoveredKeys.get(droppedDO));
+                    System.out.println("恢复的 DO " + droppedDO + " 的n_i值: " + recoveredNiValues.get(droppedDO));
                 }
 
-                // 使用恢复的私钥对全0数据进行加密并上传
-                for (int droppedDO : droppedDOs) {
-                    BigInteger[] zeroCiphertext = new BigInteger[MODEL_PARAM_LENGTH];
-                    for (int i = 0; i < MODEL_PARAM_LENGTH; i++) {
-                        zeroCiphertext[i] = csp.encryptZeroData(recoveredKeys.get(droppedDO), ta.getN(), ta.getG(),
-                                ta.getH());
-                    }
-                    csp.receiveData(droppedDO, zeroCiphertext);
-                    System.out.println("DO " + droppedDO + " 上传了全0加密数据");
-                }
-
-                // 聚合所有DO的数据（包括掉线DO的全0数据）
+                // 聚合所有DO的数据
                 aggregatedParams = csp.aggregate(ta.getN());
-                decryptedParams = csp.decrypt(aggregatedParams, ta.getLambda(), ta.getN(), ta.getU(),
+                // 使用恢复的n_i值进行解密
+                decryptedParams = csp.decryptWithRecovery(aggregatedParams, ta.getLambda(), ta.getN(), ta.getU(),
                         ta.getY());
 
                 // 计算在线DO数量并更新全局模型参数
@@ -233,20 +208,11 @@ public class All_Test {
 
             System.out.println("CSP 分发的全局模型参数: " + Arrays.toString(globalModelParams));
             // 记录当前轮次的模型参数
-            globalModelHistory.add(Arrays.copyOf(globalModelParams, globalModelParams.length));
 
             // 7. 清理CSP状态
             csp.clearState();
         }
 
-        // 仅为了输出结果，方便查看
-        for (double[] globalModelHistory2 : globalModelHistory) {
-            System.out.println("轮次 " + (globalModelHistory.indexOf(globalModelHistory2) + 1) + ": "
-                    + Arrays.toString(globalModelHistory2));
-        }
-
-        // 可视化损失曲线
-        // visualizeLossHistory(doLossHistory, numRounds);
         endTime = System.currentTimeMillis();
         System.out.println("程序运行时间：" + (endTime - startTime) + "ms");
     }
@@ -254,21 +220,6 @@ public class All_Test {
     /**
      * 使用全局模型参数生成模型参数哈希值
      */
-    private static BigInteger[] generateModelParamHashes(double[] globalModelParams) {
-        BigInteger[] modelParamHashes = new BigInteger[numDO];
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            String modelParams = Arrays.toString(globalModelParams);
-            byte[] hashBytes = digest.digest(modelParams.getBytes(StandardCharsets.UTF_8));
-            for (int i = 0; i < numDO; i++) {
-                modelParamHashes[i] = new BigInteger(1, hashBytes);
-
-            }
-        } catch (NoSuchAlgorithmException e) {
-            e.printStackTrace();
-        }
-        return modelParamHashes;
-    }
 
     /**
      * 可视化每个DO的损失曲线

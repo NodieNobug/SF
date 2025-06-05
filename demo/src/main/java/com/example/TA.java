@@ -21,13 +21,11 @@ class TA {
     // 保存每个 DO 的秘密分片，key: DO 的编号，value: 分发给其它 DO 的映射（key: 接收方 DO 编号, value: 分片值）
     public Map<Integer, Map<Integer, BigInteger>> doKeyShares = new HashMap<>();
 
-    // TA 指定的哈希算法名称
-    public String hashAlgorithm = "SHA-256";
     private int threshold; // 新增：门限值字段
     private BigInteger R_t; // 新增：存储R_t
     private List<BigInteger> R_t_history = new ArrayList<>(); // 新增：存储R_t的历史记录
     private BigInteger[] n_i; // 存储所有DO的ni值
-    private BigInteger[] modelParamHashes; // 添加字段存储模型参数哈希值
+    // 添加字段存储模型参数哈希值
 
     private static final int ORTHOGONAL_VECTOR_COUNT = 5;
     private static final int MODEL_SIZE = 5; // Define MODEL_SIZE with an appropriate value
@@ -38,12 +36,12 @@ class TA {
     /**
      * 构造 TA 对象，numDO 表示参与联邦学习的 DO 数量。
      */
-    public TA(int numDO, BigInteger[] modelParamHashes) { // 恢复 modelParamHashes 参数
+    public TA(int numDO) { // 恢复 modelParamHashes 参数
         // 新增：根据DO数量动态设置门限值
         this.threshold = (numDO * 2) / 3; // 设置为总数的2/3，可以根据需求调整
-        this.modelParamHashes = modelParamHashes; // 保存模型参数哈希值
+
         generateOrthogonalVectors();
-        keyGeneration(numDO, modelParamHashes); // 恢复 modelParamHashes 参数
+        keyGeneration(numDO); // 恢复 modelParamHashes 参数
     }
 
     public void generateOrthogonalVectors() {
@@ -151,14 +149,7 @@ class TA {
         }
     }
 
-    private void keyGeneration(int numDO, BigInteger[] modelParamHashes) {
-        // 确保 modelParamHashes 的长度与 numDO 一致
-        if (modelParamHashes.length < numDO) {
-            modelParamHashes = Arrays.copyOf(modelParamHashes, numDO);
-            for (int i = modelParamHashes.length; i < numDO; i++) {
-                modelParamHashes[i] = BigInteger.ONE; // 填充默认值
-            }
-        }
+    private void keyGeneration(int numDO) {
 
         // 生成大素数 p, q
         BigInteger p = BigInteger.probablePrime(bitLength / 2, random);
@@ -194,14 +185,14 @@ class TA {
 
         // 确保每个DO的私钥和分片正确生成
         for (int i = 0; i < numDO; i++) {
-            BigInteger sk = R_t.modPow(n_i[i].multiply(modelParamHashes[i]), N.multiply(N));
+            BigInteger sk = R_t.modPow(n_i[i], N.multiply(N));
             doPrivateKeys.put(i, sk);
         }
 
         // 对每个 DO 的私钥进行秘密分片
         BigInteger modulus = N.multiply(N); // 使用N^2作为模数
         for (int i = 0; i < numDO; i++) {
-            Map<Integer, BigInteger> shares = Threshold.splitSecret(doPrivateKeys.get(i), numDO, threshold, modulus);
+            Map<Integer, BigInteger> shares = Threshold.splitSecret(n_i[i], numDO, threshold, modulus);
             Map<Integer, BigInteger> distributedShares = new HashMap<>();
             for (int j = 0; j < numDO; j++) {
                 if (j != i) {
@@ -215,6 +206,11 @@ class TA {
     // 以下接口用于向 DO 公开全局参数和哈希算法信息
     public BigInteger getN() {
         return N;
+    }
+
+    // 获取基础密钥
+    public BigInteger getBaseKey(int doId) {
+        return doPrivateKeys.get(doId);
     }
 
     public BigInteger getG() {
@@ -231,10 +227,6 @@ class TA {
 
     public BigInteger getU() {
         return u;
-    }
-
-    public String getHashAlgorithm() {
-        return hashAlgorithm;
     }
 
     // 新增：获取当前门限值的方法
@@ -277,8 +269,4 @@ class TA {
         return orthogonalVectorsForDO;
     }
 
-    // 新增：获取模型参数哈希值的方法
-    public BigInteger[] getModelParamHashes() {
-        return modelParamHashes;
-    }
 }

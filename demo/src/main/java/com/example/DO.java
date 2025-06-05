@@ -4,12 +4,16 @@ import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
 import java.math.BigInteger;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.util.*;
 
 class DO {
     private int id;
     private TA ta; // 用于获取全局参数及私钥
+    private BigInteger basePrivatekey;
     private BigInteger myPrivateKey; // 存储自己的私钥
     private Map<Integer, BigInteger> receivedKeyShares = new HashMap<>(); // 存储其他DO的私钥分片
     private double[][] orthogonalVectors; // 正交向量组
@@ -31,7 +35,7 @@ class DO {
     public DO(int id, TA ta) {
         this.id = id;
         this.ta = ta;
-        this.myPrivateKey = ta.doPrivateKeys.get(id); // 获取自己的私钥
+        this.basePrivatekey = ta.getBaseKey(id); // 获取自己的私钥
         this.orthogonalVectors = ta.getOrthogonalVectors(); // 获取正交向量组
         this.orthogonalVectorsForDo = ta.getOrthogonalVectorsForDO(); // 获取分给DO的向量组部分
 
@@ -231,6 +235,7 @@ class DO {
      * 加密本地训练后的模型参数
      */
     public void encryptData(BigInteger N, BigInteger g, BigInteger h) {
+        updateKey();
         BigInteger N2 = N.multiply(N);
         SecureRandom random = new SecureRandom();
 
@@ -241,6 +246,26 @@ class DO {
             BigInteger part1 = g.modPow(paramValue, N2);
             BigInteger part2 = h.modPow(r, N2);
             encryptedModelParams[i] = part1.multiply(part2).mod(N2).multiply(ta.doPrivateKeys.get(id)).mod(N2);
+        }
+    }
+
+    // 写一个更新密钥的方法updatekey
+    public void updateKey() {
+        try {
+            // 计算当前模型参数的哈希值
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            String modelParams = Arrays.toString(localModelParams);
+            byte[] hashBytes = digest.digest(modelParams.getBytes(StandardCharsets.UTF_8));
+            BigInteger hash = new BigInteger(1, hashBytes);
+
+            // 计算 basePrivatekey 的 hash 次方
+            BigInteger N2 = ta.getN().multiply(ta.getN());
+            myPrivateKey = basePrivatekey.modPow(hash, N2);
+
+            System.out.println("DO " + id + " 更新了密钥");
+        } catch (NoSuchAlgorithmException e) {
+            System.err.println("计算哈希值时发生错误: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 
@@ -394,7 +419,7 @@ class DO {
      */
     public void updateTA(TA ta) {
         this.ta = ta;
-        this.myPrivateKey = ta.doPrivateKeys.get(id); // 更新自己的私钥
+        this.myPrivateKey = ta.getBaseKey(id); // 更新自己的私钥
         this.orthogonalVectors = ta.getOrthogonalVectors(); // 更新正交向量组
 
         // 清空并重新存储分片

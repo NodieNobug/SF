@@ -1,24 +1,7 @@
 package com.example;
 
-import javax.swing.*;
 import java.math.BigInteger;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.*;
-import org.jfree.chart.ChartFactory;
-import org.jfree.chart.ChartPanel;
-import org.jfree.chart.JFreeChart;
-import org.jfree.chart.plot.PlotOrientation;
-import org.jfree.chart.plot.XYPlot;
-import org.jfree.chart.renderer.xy.XYLineAndShapeRenderer;
-import org.jfree.data.xy.XYSeries;
-import org.jfree.data.xy.XYSeriesCollection;
-
-import java.awt.Color;
-import java.awt.BasicStroke;
-import java.awt.Font;
-import org.jfree.chart.StandardChartTheme;
 
 public class All_Test {
     // 记录时间
@@ -28,7 +11,7 @@ public class All_Test {
     // 添加常量定义
     private static final int MODEL_PARAM_LENGTH = 5; // 模型参数维度
     private static final int numDO = 7; // 可以设置更大的DO数量
-    private static final int numRounds = 7;// 联邦学习轮次
+    private static final int numRounds = 1;// 联邦学习轮次
 
     // 记录时间
     public static void main(String[] args) {

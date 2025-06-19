@@ -6,28 +6,33 @@ import java.util.Arrays;
 
 public class SafeMulTest {
     public static void main(String[] args) {
+        long startTime = System.currentTimeMillis();
         // 向量长度
-        int n = 5;
-        // PA持有的向量组a，每个向量长度为5
-        double[][] a = {
-                { 3.14, 2.71, 5.55, 1.41, 4.20 },
-                { 2.22, 3.33, 4.44, 1.11, 6.66 },
-                { 1.23, 5.67, 3.21, 2.34, 4.56 },
-                { 4.32, 2.12, 1.98, 5.43, 3.45 },
-                { 3.87, 4.16, 5.89, 2.71, 1.62 }
-        };
-        // PB持有的向量b
-        double[] b = { 6.28, 1.73, 2.51, 3.14, 5.92 };
+        int n = 10000;
+        int numVectors = 1024;
+        // PA持有的向量组a，每个向量长度为10000，值为-100.000~100.000的随机数
+        SecureRandom random = new SecureRandom();
+        double[][] a = new double[numVectors][n];
+        for (int i = 0; i < numVectors; i++) {
+            for (int j = 0; j < n; j++) {
+                a[i][j] = -100.0 + 200.0 * random.nextDouble();
+            }
+        }
+        // PB持有的向量b，长度为10000，值为-100.000~100.000的随机数
+        double[] b = new double[n];
+        for (int i = 0; i < n; i++) {
+            b[i] = -100.0 + 200.0 * random.nextDouble();
+        }
 
         // 精度放大因子
+
         long PRECISION_FACTOR = 1000000;
 
         // 安全参数
-        int k1 = 128; // p的比特长度 建议128以上
-        int k2 = 40; // alpha的比特长度取 40-64之间
-        int k3 = 32; // c_i的比特长度
-        int k4 = 32; // r_i的比特长度
-        SecureRandom random = new SecureRandom();
+        int k1 = 1024; // p的比特长度 建议128以上
+        int k2 = 128; // alpha的比特长度取 40-64之间
+        int k3 = 64; // c_i的比特长度
+        int k4 = 64; // r_i的比特长度
 
         // Step1: PA生成参数
         BigInteger p = BigInteger.probablePrime(k1, random);
@@ -53,16 +58,16 @@ public class SafeMulTest {
         }
 
         // PA发送(alpha, p, C[0..a.length-1][0..n+1])给PB
-        System.out.println("p: " + p);
-        System.out.println("alpha: " + alpha);
-        System.out.println("s: " + s);
-        System.out.println("s_inv: " + s_inv);
-        for (BigInteger[] c2 : C) {
-            for (BigInteger c22 : c2) {
-                System.out.print(c22 + " ");
-            }
-            System.out.println("");
-        }
+        // System.out.println("p: " + p);
+        // System.out.println("alpha: " + alpha);
+        // System.out.println("s: " + s);
+        // System.out.println("s_inv: " + s_inv);
+        // for (BigInteger[] c2 : C) {
+        // for (BigInteger c22 : c2) {
+        // System.out.print(c22 + " ");
+        // }
+        // System.out.println("");
+        // }
 
         // Step2: PB处理
         double[] b_ext = Arrays.copyOf(b, n + 2); // b扩展两位
@@ -95,6 +100,11 @@ public class SafeMulTest {
         // PA计算结果时需要考虑精度还原
         for (int vecIndex = 0; vecIndex < a.length; vecIndex++) {
             BigInteger E = s_inv.multiply(D_sums[vecIndex]).mod(p);
+            // 处理负数情况
+            if (E.compareTo(p.divide(BigInteger.TWO)) > 0) {
+                System.out.println("第一轮结果溢出，进行修正.....");
+                E = E.subtract(p);
+            }
             BigInteger inner = E.subtract(E.mod(alpha2)).divide(alpha2);
             // 还原精度
             double actualResult = inner.doubleValue() / (PRECISION_FACTOR * PRECISION_FACTOR);
@@ -106,16 +116,18 @@ public class SafeMulTest {
                 plainInner += a[vecIndex][i] * b[i];
             }
 
-            System.out.println("\n向量 " + (vecIndex + 1) + " 的计算结果:");
-            System.out.println("点积结果: " + actualResult);
+            // System.out.println("\n向量 " + (vecIndex + 1) + " 的计算结果:");
+            System.out.println("安全点积结果: " + actualResult);
             System.out.println("明文点积结果: " + plainInner);
             System.out.println("相对误差: " + Math.abs((actualResult - plainInner) / plainInner));
         }
 
         // 输出所有向量的点积结果
-        System.out.println("\n所有向量的点积结果汇总:");
-        for (int i = 0; i < results.length; i++) {
-            System.out.println("向量 " + (i + 1) + " 的点积: " + results[i]);
-        }
+        // System.out.println("\n所有向量的点积结果汇总:");
+        // for (int i = 0; i < results.length; i++) {
+        // System.out.println("向量 " + (i + 1) + " 的点积: " + results[i]);
+        // }
+        long endTime = System.currentTimeMillis();
+        System.out.println("程序运行时间：" + (endTime - startTime) + "ms");
     }
 }

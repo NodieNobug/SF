@@ -38,6 +38,8 @@ class CSP {
     private Map<Integer, BigInteger[]> firstRoundResults = new HashMap<>(); // 存储第一轮结果
     private Map<Integer, BigInteger[]> secondRoundResults = new HashMap<>(); // 存储第二轮结果
     private Map<Integer, BigInteger> recoveredNiValues = new HashMap<>(); // 存储恢复的n_i值
+    // 保存每轮的全局模型参数快照，用于hash
+    public double[] globalModelParamsSnapshot;
 
     public CSP(TA ta, int totalDO) {
         this.ta = ta;
@@ -95,6 +97,8 @@ class CSP {
         for (int i = 0; i < MODEL_SIZE; i++) {
             averagedParams[i] = aggregatedParams[i] / activeCount;
         }
+        // 保存快照用于hash
+        this.globalModelParamsSnapshot = Arrays.copyOf(averagedParams, averagedParams.length);
         return averagedParams;
     }
 
@@ -102,13 +106,13 @@ class CSP {
      * 聚合所有DO的加密模型参数
      */
 
-    public BigInteger[] aggregate(BigInteger N) {
+    public BigInteger[] aggregate() {
         aggregatedModelParams = new BigInteger[MODEL_SIZE];
         for (int i = 0; i < MODEL_SIZE; i++) {
             aggregatedModelParams[i] = BigInteger.ONE;
             for (BigInteger[] params : receivedModelParams.values()) {
                 // 连乘，得到了聚合的模型参数[[X]]
-                aggregatedModelParams[i] = aggregatedModelParams[i].multiply(params[i]).mod(N.multiply(N));
+                aggregatedModelParams[i] = aggregatedModelParams[i].multiply(params[i]).mod(ta.N.multiply(ta.N));
             }
         }
         return aggregatedModelParams;
@@ -123,10 +127,10 @@ class CSP {
         BigInteger N2 = N.multiply(N);
 
         for (int i = 0; i < MODEL_SIZE; i++) {
-            BigInteger L = aggregated[i].modPow(lambda, N2)
+            BigInteger L = aggregated[i].modPow(lambda, N2).multiply(u)
                     .subtract(BigInteger.ONE).divide(N);
 
-            BigInteger decrypted = L.multiply(u).mod(N).mod(y);
+            BigInteger decrypted = L.mod(N).mod(y);
 
             // 在BigInteger阶段处理负数情况
             if (decrypted.compareTo(y.divide(BigInteger.TWO)) > 0) {
@@ -145,6 +149,7 @@ class CSP {
      */
     public double[] decryptWithRecovery(BigInteger[] aggregated, BigInteger lambda, BigInteger N,
             BigInteger u, BigInteger y) {
+
         double[] decryptedParams = new double[MODEL_SIZE];
         BigInteger N2 = N.multiply(N);
 
@@ -152,6 +157,17 @@ class CSP {
         BigInteger sumNi = BigInteger.ZERO;
         for (BigInteger ni : recoveredNiValues.values()) {
             sumNi = sumNi.add(ni);
+        }
+
+        // 计算当前轮次CSP分发的全局模型参数的SHA-256 hash值
+        try {
+            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+            String modelParamsStr = Arrays.toString(globalModelParamsSnapshot); // 假设有此字段
+            byte[] hashBytes = digest.digest(modelParamsStr.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            BigInteger hash = new BigInteger(1, hashBytes);
+            sumNi = sumNi.multiply(hash);
+        } catch (Exception e) {
+            System.err.println("计算全局模型参数hash时出错: " + e.getMessage());
         }
 
         // 计算R_t^sumNi
@@ -480,12 +496,12 @@ class CSP {
 
         // 计算前半部分DO的聚合值
         BigInteger[] firstHalfAggregated = aggregatePartialDOs(firstHalf, ta);
-        double[] firstHalfDecrypted = decryptPartialAggregation(firstHalfAggregated, firstHalf, ta);
+        double[] firstHalfDecrypted = decrypt(firstHalfAggregated, ta.lambda, ta.N, ta.u, ta.y);
         System.out.println("前半部分DO解密后的参数: " + Arrays.toString(firstHalfDecrypted));
 
         // 计算后半部分DO的聚合值
         BigInteger[] secondHalfAggregated = aggregatePartialDOs(secondHalf, ta);
-        double[] secondHalfDecrypted = decryptPartialAggregation(secondHalfAggregated, secondHalf, ta);
+        double[] secondHalfDecrypted = decrypt(secondHalfAggregated, ta.lambda, ta.N, ta.u, ta.y);
         System.out.println("后半部分DO解密后的参数: " + Arrays.toString(secondHalfDecrypted));
 
         // 检查哪一部分的聚合值不一致
@@ -502,7 +518,7 @@ class CSP {
     }
 
     /**
-     * 聚合部分DO的加密模型参数
+     * 处理二分DO数量的加密模型参数————已处理过，可直接解密
      */
     private BigInteger[] aggregatePartialDOs(List<Integer> doIds, TA ta) {
         BigInteger N = ta.getN();
@@ -518,6 +534,15 @@ class CSP {
             sumNi = sumNi.add(n_i);
         }
         sumNi = N.subtract(sumNi); // 计算N - sumNi
+        try {
+            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+            String modelParamsStr = Arrays.toString(globalModelParamsSnapshot); // 假设有此字段
+            byte[] hashBytes = digest.digest(modelParamsStr.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            BigInteger hash = new BigInteger(1, hashBytes);
+            sumNi = sumNi.multiply(hash);
+        } catch (Exception e) {
+            System.err.println("计算全局模型参数hash时出错: " + e.getMessage());
+        }
 
         // 计算R_t^sumNi
         BigInteger R_t_pow_sumNi = R_t.modPow(sumNi, N2);
@@ -536,41 +561,6 @@ class CSP {
         }
 
         return aggregated;
-    }
-
-    /**
-     * 解密部分DO的聚合值
-     */
-    private double[] decryptPartialAggregation(BigInteger[] aggregated, List<Integer> doIds, TA ta) {
-        BigInteger N = ta.getN();
-        BigInteger N2 = N.multiply(N);
-        BigInteger lambda = ta.getLambda();
-        BigInteger u = ta.getU();
-        BigInteger y = ta.getY();
-
-        double[] decryptedParams = new double[MODEL_SIZE];
-
-        System.out.println("\n当前检查的DO: " + doIds);
-        System.out.println("部分DO聚合后的加密模型参数:");
-
-        for (int i = 0; i < MODEL_SIZE; i++) {
-            // 解密过程
-            BigInteger L = aggregated[i].modPow(lambda, N2)
-                    .subtract(BigInteger.ONE).divide(N);
-
-            // 修改：只使用mod(y)，移除mod(N)
-            BigInteger decrypted = L.multiply(u).mod(N).mod(y);
-
-            // 处理负数情况
-            if (decrypted.compareTo(y.divide(BigInteger.TWO)) > 0) {
-                decrypted = decrypted.subtract(y);
-            }
-
-            decryptedParams[i] = decrypted.doubleValue() / 1000000.0;
-            System.out.println("解密后的模型参数 " + i + ": " + decryptedParams[i]);
-        }
-
-        return decryptedParams;
     }
 
     /**
@@ -670,7 +660,7 @@ class CSP {
             // 计算内积结果
             BigInteger inner = E.subtract(E.mod(alpha2)).divide(alpha2);
             defirstRound[vecIndex] = inner;
-            System.out.println("CSP 第一轮结果解密: " + defirstRound[vecIndex]);
+
         }
 
         // 计算最终结果
@@ -680,7 +670,6 @@ class CSP {
             if (second.compareTo(halfP) > 0) {
                 second = second.subtract(p);
             }
-            System.out.println("CSP 第二轮结果: " + second);
 
             // 将两轮结果相加
             BigInteger result = defirstRound[i].add(second);

@@ -11,7 +11,7 @@ public class All_Test {
     // 添加常量定义
     private static final int MODEL_PARAM_LENGTH = 5; // 模型参数维度
     private static final int numDO = 7; // 可以设置更大的DO数量
-    private static final int numRounds = 1;// 联邦学习轮次
+    private static final int numRounds = 7;// 联邦学习轮次
 
     // 记录时间
     public static void main(String[] args) {
@@ -117,33 +117,21 @@ public class All_Test {
                 csp.receiveFirstRoundResult(doObj.getId(), firstRoundResult);
 
                 // 3. DO计算第二轮结果
-                BigInteger[] secondRoundResult = doObj.calculateSecondRound(cspP);
+                BigInteger[] secondRoundResult = doObj.calculateSecondRound(cspP, cspAlpha);
                 csp.receiveSecondRoundResult(doObj.getId(), secondRoundResult);
 
                 // 4. CSP计算最终点积结果
                 BigInteger[] finalDotProduct = csp.calculateFinalDotProduct(doObj.getId(), cspP);
-                System.out.println("DO " + doObj.getId() + " 的最终点积结果: " + Arrays.toString(finalDotProduct));
 
                 // 保存最终点积结果用于后续比较
                 csp.receiveProjections(doObj.getId(), finalDotProduct);
             }
 
             // 4. CSP聚合模型参数并解密
-            BigInteger[] aggregatedParams = csp.aggregate(ta.getN());
+            BigInteger[] aggregatedParams = csp.aggregate();
             double[] decryptedParams = null;
-            boolean decryptionFailed = false;
-            try {
-                decryptedParams = csp.decrypt(aggregatedParams, ta.getLambda(), ta.getN(), ta.getU(), ta.getY());
-                System.out.println("CSP 解密得到的聚合模型参数: " + Arrays.toString(decryptedParams));
-            } catch (Exception e) {
-                System.err.println("解密失败，可能是由于第一轮次的随机哈希值导致的错误");
-                decryptionFailed = true;
-            }
-
-            if (decryptionFailed) {
-                System.out.println("由于解密失败，本轮次的训练结果将被忽略，继续使用上一轮的全局模型参数");
-                continue;
-            }
+            decryptedParams = csp.decrypt(aggregatedParams, ta.getLambda(), ta.getN(), ta.getU(), ta.getY());
+            System.out.println("CSP 解密得到的聚合模型参数: " + Arrays.toString(decryptedParams));
 
             // 5. CSP进行投毒检测
             List<Integer> suspectedDOs = csp.detectPoisoning(decryptedParams);
@@ -193,8 +181,6 @@ public class All_Test {
                     System.out.println("恢复的 DO " + droppedDO + " 的n_i值: " + recoveredNiValues.get(droppedDO));
                 }
 
-                // 聚合所有DO的数据
-                aggregatedParams = csp.aggregate(ta.getN());
                 // 使用恢复的n_i值进行解密
                 decryptedParams = csp.decryptWithRecovery(aggregatedParams, ta.getLambda(), ta.getN(), ta.getU(),
                         ta.getY());

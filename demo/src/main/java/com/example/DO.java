@@ -16,20 +16,20 @@ class DO {
     private BigInteger basePrivatekey;
     private BigInteger myPrivateKey; // 存储自己的私钥
     private Map<Integer, BigInteger> receivedKeyShares = new HashMap<>(); // 存储其他DO的私钥分片
-    private double[][] orthogonalVectors; // 正交向量组
+
     private double[][] orthogonalVectorsForDo; // 存储分给CSP的向量组部分
     private static int MODEL_SIZE = 5; // 模型参数大小：4个权重 + 1个偏置
+    // 保存每轮的全局模型参数快照，用于后续哈希计算
+    private double[] globalModelParamsSnapshot;
     private double[] localModelParams; // 存储本地模型参数
     private BigInteger[] encryptedModelParams; // 存储加密后的模型参数数组
     private double[] projectionResults;
-    private BigInteger dot_r; // 新增：安全点积随机数r
+    private BigInteger dotrandom; // 新增：每轮的安全点积随机数
 
     // 新增用于数据处理的成员变量
     private List<double[]> processedData = new ArrayList<>();
     private List<Integer> labels = new ArrayList<>();
-    private Map<String, Integer> categoricalMaps = new HashMap<>();
     private static final String DATA_PATH = "d:\\Java_project\\SafeFl\\demo\\src\\main\\data\\adult.csv";
-
     private double lastAverageLoss; // 储最近一轮的平均损失值,用于可视化
 
     public DO(int id, TA ta) {
@@ -60,7 +60,7 @@ class DO {
         this.ta = ta;
         // this.myPrivateKey = ta.getBaseKey(id); // 更新自己的私钥
         this.orthogonalVectorsForDo = ta.getOrthogonalVectorsForDO(); // 更新正交向量组
-
+        this.basePrivatekey = ta.getBaseKey(id); // 更新基础私钥
         // // 清空并重新存储分片
         receivedKeyShares.clear();
         for (Map.Entry<Integer, Map<Integer, BigInteger>> entry : ta.doKeyShares.entrySet()) {
@@ -265,7 +265,7 @@ class DO {
 
             BigInteger part1 = g.modPow(paramValue, N2);
             BigInteger part2 = h.modPow(r, N2);
-            encryptedModelParams[i] = part1.multiply(part2).mod(N2).multiply(ta.doPrivateKeys.get(id)).mod(N2);
+            encryptedModelParams[i] = part1.multiply(part2).multiply(myPrivateKey).mod(N2);
         }
     }
 
@@ -274,17 +274,17 @@ class DO {
      */
     public void updateKey() {
         try {
-            // 计算当前模型参数的哈希值
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            String modelParams = Arrays.toString(localModelParams);
+            String modelParams = Arrays.toString(globalModelParamsSnapshot);
             byte[] hashBytes = digest.digest(modelParams.getBytes(StandardCharsets.UTF_8));
             BigInteger hash = new BigInteger(1, hashBytes);
 
-            // 计算 basePrivatekey 的 hash 次方
             BigInteger N2 = ta.getN().multiply(ta.getN());
             myPrivateKey = basePrivatekey.modPow(hash, N2);
 
-            System.out.println("DO " + id + " 更新了密钥");
+            System.out.println(
+                    "\nDO " + id + "使用的hash模型参数" + Arrays.toString(globalModelParamsSnapshot) + "更新了密钥....hash值："
+                            + hash.toString(16));
         } catch (NoSuchAlgorithmException e) {
             System.err.println("计算哈希值时发生错误: " + e.getMessage());
             e.printStackTrace();
@@ -303,38 +303,16 @@ class DO {
     }
 
     /**
-     * 计算点积结果,暂时废弃
-     */
-    // public void calculateProjections() {
-    // projectionResults = new double[orthogonalVectors.length]; // 修改为正确长度5
-    // // 计算模型参数与每个正交向量的点积
-    // for (int i = 0; i < orthogonalVectors.length; i++) {
-    // double dotProduct = 0;
-    // for (int j = 0; j < MODEL_SIZE; j++) {
-    // dotProduct += orthogonalVectors[i][j] * localModelParams[j];
-    // }
-    // projectionResults[i] = dotProduct;
-    // }
-    // System.out.println("DO " + id + " 的点积结果（模型参数在各正交向量上的投影）: " +
-    // Arrays.toString(projectionResults));
-    // }
-
-    /**
      * 安全点积
      */
 
-    // 生成getdot_r方法
-    // public BigInteger getDot_r() {
-    // int k4 = 32;
-    // SecureRandom random = new SecureRandom();
-    // dot_r = new BigInteger(k4, random);
-    // return dot_r;
-    // }
-
     public BigInteger[] calculateFirstRound(BigInteger[][] encryptedVectors, BigInteger p, BigInteger alpha) {
         int k4 = 32;
+        dotrandom = new BigInteger(k4, new SecureRandom());
         SecureRandom random = new SecureRandom();
         double[] b_ext = Arrays.copyOf(localModelParams, MODEL_SIZE + 2); // b扩展两位
+
+        // 每轮只生成一次随机数
 
         BigInteger[] D_sums = new BigInteger[orthogonalVectorsForDo.length];
 
@@ -342,7 +320,11 @@ class DO {
             BigInteger[] D = new BigInteger[MODEL_SIZE + 2];
             for (int i = 0; i < MODEL_SIZE + 2; i++) {
                 if (b_ext[i] != 0) {
+
                     BigInteger value = BigInteger.valueOf((long) (b_ext[i] * 1000000)); // 放大精度
+                    // System.out.println("DO" + id + "第一轮加的随机数: " + dotrandom);
+                    // value = value.add(dotrandom);
+
                     D[i] = value.multiply(alpha).multiply(encryptedVectors[vecIndex][i]).mod(p);
                 } else {
                     BigInteger r = new BigInteger(k4, random);
@@ -353,13 +335,9 @@ class DO {
             for (int i = 0; i < MODEL_SIZE + 2; i++) {
                 D_sum = D_sum.add(D[i]);
             }
+
             D_sums[vecIndex] = D_sum.mod(p);
         }
-
-        // for (int i = 0; i < orthogonalVectorsForDo.length; i++) {
-        // System.out.println("DO" + id + "点积第一轮加的随机数:" + dot_r);
-        // D_sums[i] = D_sums[i].mod(p);
-        // }
 
         // System.out.println("DO " + id + " 计算第一轮结果: " + Arrays.toString(D_sums));
         return D_sums;
@@ -367,7 +345,7 @@ class DO {
 
     // 计算第二轮结果
     // 直接用自己训练后的全局模型参数点积自己的这一半正交向量组
-    public BigInteger[] calculateSecondRound(BigInteger p) {
+    public BigInteger[] calculateSecondRound(BigInteger p, BigInteger alpha) {
         BigInteger[] secondRoundResults = new BigInteger[orthogonalVectorsForDo.length];
         // BigInteger halfP = p.divide(BigInteger.valueOf(2));
 
@@ -380,16 +358,11 @@ class DO {
                 // System.out.println("当前DO的model参数: " + localModelParams[j]);
                 // System.out.println("当前DO的正交向量组: " + orthogonalVectorsForDo[i][j]);
                 // 转换为BigInteger并放大精度
-                BigInteger modelParam = BigInteger.valueOf((long) (localModelParams[j] * 1000000));
-                BigInteger vectorValue = BigInteger.valueOf((long) (orthogonalVectorsForDo[i][j] * 1000000));
 
-                // 处理负数 - 将负数转换为模p意义下的等价值
-                // if (modelParam.signum() < 0) {
-                // modelParam = p.add(modelParam);
-                // }
-                // if (vectorValue.signum() < 0) {
-                // vectorValue = p.add(vectorValue);
-                // }
+                BigInteger modelParam = BigInteger.valueOf((long) (localModelParams[j] * 1000000));
+                // modelParam = modelParam.subtract(dotrandom); // 减去每轮的随机数
+                // System.out.println("DO" + id + "第二轮减去的随机数: " + dotrandom);
+                BigInteger vectorValue = BigInteger.valueOf((long) (orthogonalVectorsForDo[i][j] * 1000000));
 
                 // 计算乘积并累加
                 BigInteger product = modelParam.multiply(vectorValue);
@@ -401,7 +374,8 @@ class DO {
             // dotProduct = dotProduct.subtract(p);
             // }
 
-            // 减去随机数
+            // 直接取模即可，已在上面减去roundRandom
+            // dotProduct = dotProduct.subtract(dotrandom.multiply(alpha)); // 减去每轮的随机数
             BigInteger result = dotProduct.mod(p);
 
             // if (result.compareTo(halfP) > 0) {
@@ -425,6 +399,7 @@ class DO {
     public int getId() {
         return id;
     }
+    // 获取dotrandom
 
     public double[] getLocalModelParams() {
         return Arrays.copyOf(localModelParams, localModelParams.length);
@@ -437,6 +412,8 @@ class DO {
     public void updateGlobalModelParams(double[] globalModelParams) {
         System.out.println("DO " + id + " 接收到全局模型参数: " + Arrays.toString(globalModelParams));
         this.localModelParams = Arrays.copyOf(globalModelParams, globalModelParams.length); // 初始化模型参数
+        // 保存一份快照用于后续Hash
+        this.globalModelParamsSnapshot = Arrays.copyOf(globalModelParams, globalModelParams.length);
     }
 
 }

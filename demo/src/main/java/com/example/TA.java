@@ -185,6 +185,7 @@ class TA {
 
         // 确保每个DO的私钥和分片正确生成
         for (int i = 0; i < numDO; i++) {
+            // System.out.println("TA:::DO " + i + " 的 n_i: " + n_i[i]);
             BigInteger sk = R_t.modPow(n_i[i], N.multiply(N));
             doPrivateKeys.put(i, sk);
         }
